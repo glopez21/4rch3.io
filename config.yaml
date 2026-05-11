@@ -1,0 +1,49 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  external_url: "https://4rch3.io"
+  read_timeout: 10s
+  write_timeout: 30s
+  trusted_proxies:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+  lan_subnets:
+    - "192.168.0.0/16"
+    - "10.0.0.0/8"
+
+database:
+  path: "data/portal.db"
+
+auth:
+  jwt_secret: "CHANGE-ME-IN-PRODUCTION-USE-A-STRONG-RANDOM-SECRET"
+  jwt_expiry: 24h
+  session_expiry: 720h
+  bcrypt_cost: 12
+  rate_limit_per_min: 10
+  api_rate_limit_per_min: 60
+  allow_registration: false
+  invite_only: true
+  session_cookie_name: "4rch3_session"
+
+discovery:
+  docker_socket: "unix:///var/run/docker.sock"
+  scan_interval: 30s
+  default_network: "devnet"
+  label_prefix: "4rch3.io"
+
+monitor:
+  check_interval: 30s
+  timeout: 5s
+  retry_count: 2
+  status_page_public: false
+
+cors:
+  enabled: true
+  allowed_origins:
+    - "https://4rch3.io"
+    - "http://homelab.local"
+
+logging:
+  level: "info"
+  format: "text"

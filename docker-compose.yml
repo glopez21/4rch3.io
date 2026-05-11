@@ -1,0 +1,34 @@
+services:
+  portal:
+    build: .
+    container_name: 4rch3-portal
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portal_data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=America/New_York
+    networks:
+      - devnet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portal.rule=Host(`4rch3.io`) || Host(`portal.4rch3.io`)"
+      - "traefik.http.routers.portal.entrypoints=websecure"
+      - "traefik.http.routers.portal.tls=true"
+      - "traefik.http.services.portal.loadbalancer.server.port=8080"
+      - "traefik.docker.network=devnet"
+      - "4rch3.io.enable=true"
+      - "4rch3.io.service=portal"
+      - "4rch3.io.name=4rch3 Portal"
+      - "4rch3.io.description=Homelab operations portal"
+
+volumes:
+  portal_data:
+
+networks:
+  devnet:
+    external: true
+    name: devnet
