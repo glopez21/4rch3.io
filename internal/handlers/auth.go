@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -56,6 +57,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.authSvc.Authenticate(req.Username, req.Password)
 	if err != nil {
+		slog.Warn("login failed", "username", req.Username, "error", err)
 		if r.Header.Get("HX-Request") != "" {
 			w.Header().Set("HX-Retarget", "#login-error")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
@@ -94,12 +96,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     h.cfg.SessionCookieName,
 		Value:    sessionToken,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(h.cfg.SessionExpiry.Seconds()),
 	})
@@ -129,7 +132,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 		MaxAge:   -1,
 	})
 
@@ -148,7 +151,7 @@ func (h *AuthHandler) renderLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(loginPage))
+	loginTmpl.Execute(w, nil)
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {

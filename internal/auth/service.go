@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/4rch3/portal/internal/database"
 	"github.com/4rch3/portal/internal/models"
@@ -20,6 +21,7 @@ func NewService(a *Auth, db *database.DB) *Service {
 func (s *Service) Authenticate(username, password string) (*models.User, error) {
 	user, err := s.db.GetUserByUsername(username)
 	if err != nil {
+		slog.Warn("auth: get user failed", "username", username, "error", err)
 		return nil, errors.New("invalid credentials")
 	}
 
@@ -36,6 +38,10 @@ func (s *Service) Authenticate(username, password string) (*models.User, error) 
 
 func (s *Service) GetUserByID(id int64) (*models.User, error) {
 	return s.db.GetUserByID(id)
+}
+
+func (s *Service) ListUsers() ([]*models.User, error) {
+	return s.db.ListUsers()
 }
 
 func (s *Service) ValidateAPIKey(key string) (*models.User, error) {
@@ -67,4 +73,16 @@ func (s *Service) CreateUser(username, email, password string, role models.Role)
 	}
 
 	return user, nil
+}
+
+func (s *Service) UpdatePassword(id int64, hash string) error {
+	return s.db.UpdatePassword(id, hash)
+}
+
+func (s *Service) GetSession(token string) (*models.Session, error) {
+	return s.db.GetSession(token)
+}
+
+func (s *Service) DeleteSession(token string) error {
+	return s.db.DeleteSession(token)
 }

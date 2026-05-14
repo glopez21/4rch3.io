@@ -13,9 +13,9 @@ import (
 )
 
 type Proxy struct {
-	db       *database.DB
-	proxies  map[string]*httputil.ReverseProxy
-	mu       sync.RWMutex
+	db      *database.DB
+	proxies map[string]*httputil.ReverseProxy
+	mu      sync.RWMutex
 }
 
 func New(db *database.DB) *Proxy {
@@ -73,26 +73,20 @@ func (p *Proxy) Handler() http.Handler {
 			return
 		}
 
+		if user != nil {
+			r.Header.Set("X-Forwarded-User", user.Username)
+			r.Header.Set("X-Forwarded-Role", string(user.Role))
+		}
+		r.Header.Set("X-Forwarded-For", r.RemoteAddr)
+
 		proxy := p.getProxy(target)
 
-		rewrite := &httputil.ProxyRequest{
-			In:  r,
-			Out: r.Clone(r.Context()),
-		}
-		rewrite.SetURL(target)
 		if len(parts) > 1 {
-			rewrite.Out.URL.Path = "/" + parts[1]
+			r.URL.Path = "/" + parts[1]
 		} else {
-			rewrite.Out.URL.Path = "/"
+			r.URL.Path = "/"
 		}
-		rewrite.Out.URL.RawPath = ""
-		rewrite.Out.Host = target.Host
-
-		if user != nil {
-			rewrite.Out.Header.Set("X-Forwarded-User", user.Username)
-			rewrite.Out.Header.Set("X-Forwarded-Role", string(user.Role))
-		}
-		rewrite.Out.Header.Set("X-Forwarded-For", r.RemoteAddr)
+		r.URL.RawPath = ""
 
 		proxy.ServeHTTP(w, r)
 	})

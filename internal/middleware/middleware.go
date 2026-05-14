@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -141,9 +141,11 @@ func (m *Middleware) RequireRole(roles ...models.Role) func(http.Handler) http.H
 func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var token string
+		var fromCookie bool
 
 		if cookie, err := r.Cookie("4rch3_session"); err == nil {
 			token = cookie.Value
+			fromCookie = true
 		}
 
 		if token == "" {
@@ -175,6 +177,27 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 			return
 		}
 
+		if fromCookie {
+			session, err := m.authService.GetSession(token)
+			if err != nil || session == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if time.Now().After(session.ExpiresAt) {
+				m.authService.DeleteSession(token)
+				next.ServeHTTP(w, r)
+				return
+			}
+			user, err := m.authService.GetUserByID(session.UserID)
+			if err != nil || user == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx := context.WithValue(r.Context(), UserKey, user)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		claims, err := m.authService.ValidateJWT(token)
 		if err != nil {
 			next.ServeHTTP(w, r)
@@ -198,7 +221,12 @@ func Logging(next http.Handler) http.Handler {
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(wrapped, r)
-		log.Printf("%s %s %d %s", r.Method, r.URL.Path, wrapped.status, time.Since(start))
+		slog.Info("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", wrapped.status,
+			"duration", time.Since(start),
+		)
 	})
 }
 

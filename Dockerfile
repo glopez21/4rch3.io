@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache gcc musl-dev sqlite-dev
 
@@ -20,6 +20,6 @@ COPY internal/database/schema.sql ./internal/database/
 
 RUN mkdir -p data
 
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["./server"]

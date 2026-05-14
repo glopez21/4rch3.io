@@ -76,7 +76,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
 			Host:          "0.0.0.0",
-			Port:          8080,
+			Port:          8081,
 			ExternalURL:   "https://4rch3.io",
 			ReadTimeout:   10 * time.Second,
 			WriteTimeout:  30 * time.Second,

@@ -59,66 +59,90 @@ func (db *DB) CreateUser(u *models.User) error {
 
 func (db *DB) GetUserByID(id int64) (*models.User, error) {
 	u := &models.User{}
-	var lastLogin, lastIP sql.NullString
+	var lastLogin, lastIP, mfaSecret, apiKey, createdAt, updatedAt sql.NullString
 	err := db.QueryRow(
 		`SELECT id, username, email, password_hash, role, mfa_enabled, mfa_secret,
 		        api_key, active, last_login, last_ip, created_at, updated_at
 		 FROM users WHERE id = ?`, id,
 	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role,
-		&u.MFAEnabled, &u.MFASecret, &u.APIKey, &u.Active,
-		&lastLogin, &lastIP, &u.CreatedAt, &u.UpdatedAt)
+		&u.MFAEnabled, &mfaSecret, &apiKey, &u.Active,
+		&lastLogin, &lastIP, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
+	u.MFASecret = mfaSecret.String
+	u.APIKey = apiKey.String
 	if lastLogin.Valid {
 		u.LastLogin, _ = time.Parse("2006-01-02 15:04:05", lastLogin.String)
 	}
 	if lastIP.Valid {
 		u.LastIP = lastIP.String
+	}
+	if createdAt.Valid {
+		u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt.String)
+	}
+	if updatedAt.Valid {
+		u.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt.String)
 	}
 	return u, nil
 }
 
 func (db *DB) GetUserByUsername(username string) (*models.User, error) {
 	u := &models.User{}
-	var lastLogin, lastIP sql.NullString
+	var lastLogin, lastIP, mfaSecret, apiKey, createdAt, updatedAt sql.NullString
 	err := db.QueryRow(
 		`SELECT id, username, email, password_hash, role, mfa_enabled, mfa_secret,
 		        api_key, active, last_login, last_ip, created_at, updated_at
 		 FROM users WHERE username = ?`, username,
 	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role,
-		&u.MFAEnabled, &u.MFASecret, &u.APIKey, &u.Active,
-		&lastLogin, &lastIP, &u.CreatedAt, &u.UpdatedAt)
+		&u.MFAEnabled, &mfaSecret, &apiKey, &u.Active,
+		&lastLogin, &lastIP, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
+	u.MFASecret = mfaSecret.String
+	u.APIKey = apiKey.String
 	if lastLogin.Valid {
 		u.LastLogin, _ = time.Parse("2006-01-02 15:04:05", lastLogin.String)
 	}
 	if lastIP.Valid {
 		u.LastIP = lastIP.String
+	}
+	if createdAt.Valid {
+		u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt.String)
+	}
+	if updatedAt.Valid {
+		u.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt.String)
 	}
 	return u, nil
 }
 
 func (db *DB) GetUserByAPIKey(key string) (*models.User, error) {
 	u := &models.User{}
-	var lastLogin, lastIP sql.NullString
+	var lastLogin, lastIP, mfaSecret, apiKey, createdAt, updatedAt sql.NullString
 	err := db.QueryRow(
 		`SELECT id, username, email, password_hash, role, mfa_enabled, mfa_secret,
 		        api_key, active, last_login, last_ip, created_at, updated_at
 		 FROM users WHERE api_key = ? AND active = 1`, key,
 	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role,
-		&u.MFAEnabled, &u.MFASecret, &u.APIKey, &u.Active,
-		&lastLogin, &lastIP, &u.CreatedAt, &u.UpdatedAt)
+		&u.MFAEnabled, &mfaSecret, &apiKey, &u.Active,
+		&lastLogin, &lastIP, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
+	u.MFASecret = mfaSecret.String
+	u.APIKey = apiKey.String
 	if lastLogin.Valid {
 		u.LastLogin, _ = time.Parse("2006-01-02 15:04:05", lastLogin.String)
 	}
 	if lastIP.Valid {
 		u.LastIP = lastIP.String
+	}
+	if createdAt.Valid {
+		u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt.String)
+	}
+	if updatedAt.Valid {
+		u.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt.String)
 	}
 	return u, nil
 }
@@ -135,9 +159,9 @@ func (db *DB) ListUsers() ([]*models.User, error) {
 	var users []*models.User
 	for rows.Next() {
 		u := &models.User{}
-		var lastLogin, lastIP sql.NullString
+		var lastLogin, lastIP, createdAt, updatedAt sql.NullString
 		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.Active,
-			&lastLogin, &lastIP, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			&lastLogin, &lastIP, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		if lastLogin.Valid {
@@ -145,6 +169,12 @@ func (db *DB) ListUsers() ([]*models.User, error) {
 		}
 		if lastIP.Valid {
 			u.LastIP = lastIP.String
+		}
+		if createdAt.Valid {
+			u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt.String)
+		}
+		if updatedAt.Valid {
+			u.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt.String)
 		}
 		users = append(users, u)
 	}
@@ -164,6 +194,11 @@ func (db *DB) UpdateUserRole(id int64, role models.Role) error {
 	return err
 }
 
+func (db *DB) UpdatePassword(id int64, hash string) error {
+	_, err := db.Exec(`UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`, hash, id)
+	return err
+}
+
 func (db *DB) DeleteUser(id int64) error {
 	_, err := db.Exec(`DELETE FROM users WHERE id = ?`, id)
 	return err
@@ -180,15 +215,16 @@ func (db *DB) CreateSession(s *models.Session) error {
 
 func (db *DB) GetSession(token string) (*models.Session, error) {
 	s := &models.Session{}
-	var expiresAt string
+	var expiresAt, createdAt string
 	err := db.QueryRow(
 		`SELECT id, user_id, token, expires_at, created_at, ip, user_agent
 		 FROM sessions WHERE token = ?`, token,
-	).Scan(&s.ID, &s.UserID, &s.Token, &expiresAt, &s.CreatedAt, &s.IP, &s.UserAgent)
+	).Scan(&s.ID, &s.UserID, &s.Token, &expiresAt, &createdAt, &s.IP, &s.UserAgent)
 	if err != nil {
 		return nil, err
 	}
 	s.ExpiresAt, _ = time.Parse("2006-01-02 15:04:05", expiresAt)
+	s.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
 	return s, nil
 }
 

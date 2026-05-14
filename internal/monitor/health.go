@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -40,7 +40,7 @@ func New(db *database.DB, interval, timeout time.Duration, retries int) *Monitor
 }
 
 func (m *Monitor) Start(ctx context.Context) {
-	log.Printf("[monitor] starting health checks (interval: %s, timeout: %s)", m.interval, m.timeout)
+	slog.Info("starting health monitor", "interval", m.interval, "timeout", m.timeout)
 
 	m.CheckAll(ctx)
 
@@ -52,7 +52,7 @@ func (m *Monitor) Start(ctx context.Context) {
 		case <-ticker.C:
 			m.CheckAll(ctx)
 		case <-ctx.Done():
-			log.Printf("[monitor] stopping")
+			slog.Info("health monitor stopped")
 			return
 		}
 	}
@@ -61,7 +61,7 @@ func (m *Monitor) Start(ctx context.Context) {
 func (m *Monitor) CheckAll(ctx context.Context) {
 	services, err := m.db.ListServices()
 	if err != nil {
-		log.Printf("[monitor] error listing services: %v", err)
+		slog.Error("health monitor: list services error", "error", err)
 		return
 	}
 
@@ -102,15 +102,20 @@ func (m *Monitor) CheckService(ctx context.Context, svc *models.Service) {
 			lastStatus = "offline"
 			lastLatency = latency
 			lastErr = err.Error()
-			log.Printf("[monitor] %s offline: %v (attempt %d/%d)", svc.Name, err, attempt+1, m.retries+1)
+			slog.Warn("health monitor: service offline",
+					"service", svc.Name,
+					"error", err,
+					"attempt", attempt+1,
+					"max_attempts", m.retries+1,
+				)
 			if attempt < m.retries {
 				time.Sleep(1 * time.Second)
 				continue
 			}
 			break
 		}
-		defer resp.Body.Close()
 		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 
 		lastLatency = latency
 		lastCode = resp.StatusCode
@@ -132,7 +137,7 @@ func (m *Monitor) CheckService(ctx context.Context, svc *models.Service) {
 	}
 
 	if err := m.db.UpdateServiceStatus(svc.ID, lastStatus, lastLatency); err != nil {
-		log.Printf("[monitor] error updating status for %s: %v", svc.Name, err)
+		slog.Error("health monitor: status update error", "service", svc.Name, "error", err)
 	}
 
 	m.db.RecordHealthCheck(&models.HealthCheck{

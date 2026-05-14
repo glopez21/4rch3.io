@@ -4,7 +4,7 @@ services:
     container_name: 4rch3-portal
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8081:8081"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portal_data:/app/data
@@ -18,7 +18,7 @@ services:
       - "traefik.http.routers.portal.rule=Host(`4rch3.io`) || Host(`portal.4rch3.io`)"
       - "traefik.http.routers.portal.entrypoints=websecure"
       - "traefik.http.routers.portal.tls=true"
-      - "traefik.http.services.portal.loadbalancer.server.port=8080"
+      - "traefik.http.services.portal.loadbalancer.server.port=8081"
       - "traefik.docker.network=devnet"
       - "4rch3.io.enable=true"
       - "4rch3.io.service=portal"

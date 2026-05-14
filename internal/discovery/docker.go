@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -49,7 +51,7 @@ func NewDockerDiscovery(db *database.DB, socketPath, labelPrefix, network string
 }
 
 func (d *DockerDiscovery) Start(ctx context.Context) {
-	log.Printf("[discovery] starting docker discovery (socket: %s, interval: %s)", d.socketPath, d.interval)
+	slog.Info("starting docker discovery", "socket", d.socketPath, "interval", d.interval)
 
 	d.Scan(ctx)
 
@@ -61,7 +63,7 @@ func (d *DockerDiscovery) Start(ctx context.Context) {
 		case <-ticker.C:
 			d.Scan(ctx)
 		case <-ctx.Done():
-			log.Printf("[discovery] stopping")
+			slog.Info("docker discovery stopped")
 			return
 		}
 	}
@@ -91,25 +93,32 @@ type dockerNetwork struct {
 }
 
 func (d *DockerDiscovery) Scan(ctx context.Context) {
-	filter := fmt.Sprintf(`{"label":{"%s.enable":["true"]}}`, d.labelPrefix)
-	url := fmt.Sprintf("http://localhost/containers/json?filters=%s", filter)
+	filter := fmt.Sprintf(`{"label":{"%s.enable":true}}`, d.labelPrefix)
+	apiURL := fmt.Sprintf("http://localhost/containers/json?filters=%s", url.QueryEscape(filter))
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
-		log.Printf("[discovery] error creating request: %v", err)
+		slog.Warn("docker discovery: error creating request", "error", err)
 		return
 	}
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		log.Printf("[discovery] error connecting to docker socket: %v", err)
+		slog.Warn("docker discovery: connection error", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		slog.Warn("docker discovery: API error", "status", resp.StatusCode, "body", string(body))
+		return
+	}
+
 	var containers []dockerContainer
-	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
-		log.Printf("[discovery] error decoding response: %v", err)
+	if err := json.Unmarshal(body, &containers); err != nil {
+		slog.Error("docker discovery: decode error", "body", string(body))
 		return
 	}
 
@@ -125,14 +134,14 @@ func (d *DockerDiscovery) Scan(ctx context.Context) {
 
 		id, err := d.db.CreateService(svc)
 		if err != nil {
-			log.Printf("[discovery] error saving service %s: %v", svc.Name, err)
+			slog.Warn("docker discovery: save error", "service", svc.Name, "error", err)
 			continue
 		}
-		log.Printf("[discovery] discovered service: %s (id=%d)", svc.Name, id)
+		slog.Info("docker discovery: service discovered", "service", svc.Name, "id", id)
 	}
 
 	if len(containers) == 0 {
-		log.Printf("[discovery] no running containers found with label %s.enable=true", d.labelPrefix)
+		slog.Debug("docker discovery: no containers found", "label_prefix", d.labelPrefix)
 	}
 }
 
