@@ -22,3 +22,10 @@ go.work
 # OS
 .DS_Store
 Thumbs.db
+
+# Data
+data/
+
+# Build output
+build/
+portal

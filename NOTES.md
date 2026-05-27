@@ -167,6 +167,23 @@ The following were implemented to close the gap between config.yaml and actual r
 - **Rate limiting** (`internal/middleware/ratelimit.go`): Per-IP token bucket using `golang.org/x/time/rate`. Auth endpoints limited to `rate_limit_per_min: 10` (burst 1). API endpoints limited to `api_rate_limit_per_min: 60` (burst 5). Background cleanup every 10 minutes.
 - **Structured logging** (`log/slog`): All `log.Printf` replaced with `slog.Info/Warn/Error/Debug` across 6 source files. Config-driven via `logging.level` (debug/info/warn/error) and `logging.format` (text/json). Request logging in middleware emits structured attrs (method, path, status, duration).
 
+## Completed Upgrades (May 2026)
+
+- [x] **Prometheus /metrics endpoint** (`internal/metrics/metrics.go`) — request count, duration, active services, auth attempts, health check results, sessions, uptime
+- [x] **WebSocket proxy support** (`internal/proxy/proxy.go`) — detects `Upgrade: websocket`, hijacks connections, bidirectional copy
+- [x] **Structured JSON error responses** — all handlers return `{"error":"..."}` JSON instead of plain text
+- [x] **Docker HEALTHCHECK** — `wget`-based health check at 30s interval
+- [x] **Non-root container user** — `portal` user in Dockerfile
+- [x] **JWT secret validation** — catches both Go default and config.yaml default
+- [x] **Rate limiter state leak** — cleanup only evicts full-bucket visitors, doesn't wipe map
+- [x] **Proxy header injection fix** — strips incoming `X-Forwarded-User`/`X-Forwarded-Role` before setting
+- [x] **Session ID ≠ token** — separate random ID value, no longer leaks session token
+- [x] **SameSite=Strict** — changed from LaxMode for CSRF mitigation
+- [x] **CSRF protection** — HMAC-SHA256 tokens on login form POST
+- [x] **AuthConfig deduplication** — removed duplicated struct; individual constructor params
+- [x] **Hardcoded cookie name** — middleware now reads from config
+- [x] **SQLite time scan fix** — TEXT columns scanned as string, parsed with `time.Parse`
+
 ## Optimization Recommendations
 
 ### Priority 1: Critical Bugs (Completed)
@@ -204,17 +221,17 @@ The following were implemented to close the gap between config.yaml and actual r
 - [ ] Add `X-Request-ID` middleware for request tracing
 - [ ] Add session garbage collection goroutine
 - [x] Remove `replace` directive for `docker/distribution` — already removed
-- [ ] Unify `auth.AuthConfig` with `config.AuthConfig` (remove duplication in main.go)
-- [ ] Add config validation at startup (fail fast on missing jwt_secret, etc.)
+- [x] Unify `auth.AuthConfig` with `config.AuthConfig` (remove duplication in main.go)
+- [x] Add config validation at startup (fail fast on missing jwt_secret, etc.)
 - [ ] Add a `Makefile` with build, test, lint, docker-build targets
 
 #### Near-Term (High Value, Low Effort)
 
-- [ ] WebSocket proxy support (`Upgrade` header detection in reverse proxy)
+- [x] WebSocket proxy support (`Upgrade` header detection in reverse proxy)
+- [x] Prometheus `/metrics` endpoint (service count, health distribution, auth attempts)
 - [ ] Service grouping/tags via `4rch3.io.category` and `4rch3.io.group` labels
 - [ ] Client-side dashboard search/filter for services
 - [ ] Config hot-reload via `fsnotify` + SIGHUP handler
-- [ ] Prometheus `/metrics` endpoint (service count, health distribution, auth attempts)
 - [ ] API key management UI (backend supports keys, no UI to create/revoke)
 
 #### Mid-Term
@@ -249,5 +266,5 @@ The following were implemented to close the gap between config.yaml and actual r
 - [ ] CLI tool for management
 - [ ] Audit log viewer in admin panel
 - [ ] Tailscale integration for LAN-less access
-- [ ] Metrics export (Prometheus)
+- [x] Metrics export (Prometheus)
 - [x] Bootstrap admin via env vars at startup (not just CLI flag)

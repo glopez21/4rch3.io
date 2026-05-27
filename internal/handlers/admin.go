@@ -23,25 +23,25 @@ func NewAdminHandler(db *database.DB, authSvc *auth.Service) *AdminHandler {
 func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUser(r)
 	if user == nil || user.Role != models.RoleAdmin {
-		http.Error(w, "forbidden", http.StatusForbidden)
+		writeErrorJSON(w, http.StatusForbidden, "forbidden")
 		return
 	}
 
 	users, err := h.db.ListUsers()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeErrorJSON(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	services, err := h.db.ListServices()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeErrorJSON(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	logs, err := h.db.GetAuditLogs(50)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeErrorJSON(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUser(r)
 	if user == nil || user.Role != models.RoleAdmin {
-		http.Error(w, "forbidden", http.StatusForbidden)
+		writeErrorJSON(w, http.StatusForbidden, "forbidden")
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		users, err := h.db.ListUsers()
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeErrorJSON(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 		writeJSON(w, http.StatusOK, users)
@@ -137,6 +137,6 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErrorJSON(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }

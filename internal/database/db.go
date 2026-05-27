@@ -24,8 +24,8 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {
@@ -238,6 +238,14 @@ func (db *DB) DeleteUserSessions(userID int64) error {
 	return err
 }
 
+func (db *DB) DeleteExpiredSessions() (int64, error) {
+	res, err := db.Exec(`DELETE FROM sessions WHERE expires_at <= datetime('now')`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (db *DB) CreateService(svc *models.Service) (int64, error) {
 	res, err := db.Exec(
 		`INSERT INTO services (name, display_name, description, url, internal_url, icon,
@@ -271,16 +279,22 @@ func (db *DB) ListServices() ([]*models.Service, error) {
 	var services []*models.Service
 	for rows.Next() {
 		s := &models.Service{}
-		var lastChecked sql.NullString
+		var lastChecked, createdAt, updatedAt sql.NullString
 		if err := rows.Scan(&s.ID, &s.Name, &s.DisplayName, &s.Description,
 			&s.URL, &s.InternalURL, &s.Icon, &s.Category, &s.Group,
 			&s.HealthPath, &s.Type, &s.DockerID, &s.DockerName,
 			&s.Enabled, &s.Public, &s.Status, &s.Latency,
-			&lastChecked, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			&lastChecked, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		if lastChecked.Valid {
 			s.LastChecked, _ = time.Parse("2006-01-02 15:04:05", lastChecked.String)
+		}
+		if createdAt.Valid {
+			s.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt.String)
+		}
+		if updatedAt.Valid {
+			s.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt.String)
 		}
 		services = append(services, s)
 	}
@@ -289,7 +303,7 @@ func (db *DB) ListServices() ([]*models.Service, error) {
 
 func (db *DB) GetService(id int64) (*models.Service, error) {
 	s := &models.Service{}
-	var lastChecked sql.NullString
+	var lastChecked, createdAt, updatedAt sql.NullString
 	err := db.QueryRow(
 		`SELECT id, name, display_name, description, url, internal_url, icon,
 		 category, group_name, health_path, type, docker_id, docker_name,
@@ -299,12 +313,18 @@ func (db *DB) GetService(id int64) (*models.Service, error) {
 		&s.URL, &s.InternalURL, &s.Icon, &s.Category, &s.Group,
 		&s.HealthPath, &s.Type, &s.DockerID, &s.DockerName,
 		&s.Enabled, &s.Public, &s.Status, &s.Latency,
-		&lastChecked, &s.CreatedAt, &s.UpdatedAt)
+		&lastChecked, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
 	if lastChecked.Valid {
 		s.LastChecked, _ = time.Parse("2006-01-02 15:04:05", lastChecked.String)
+	}
+	if createdAt.Valid {
+		s.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt.String)
+	}
+	if updatedAt.Valid {
+		s.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt.String)
 	}
 	return s, nil
 }
@@ -345,10 +365,12 @@ func (db *DB) GetRecentHealthChecks(serviceID int64, limit int) ([]*models.Healt
 	var checks []*models.HealthCheck
 	for rows.Next() {
 		h := &models.HealthCheck{}
+		var checkedAt string
 		if err := rows.Scan(&h.ID, &h.ServiceID, &h.Status, &h.Latency,
-			&h.Code, &h.Error, &h.CheckedAt); err != nil {
+			&h.Code, &h.Error, &checkedAt); err != nil {
 			return nil, err
 		}
+		h.CheckedAt, _ = time.Parse("2006-01-02 15:04:05", checkedAt)
 		checks = append(checks, h)
 	}
 	return checks, nil
@@ -375,10 +397,35 @@ func (db *DB) GetAuditLogs(limit int) ([]*models.AuditLog, error) {
 	var logs []*models.AuditLog
 	for rows.Next() {
 		l := &models.AuditLog{}
+		var createdAt string
 		if err := rows.Scan(&l.ID, &l.UserID, &l.Action, &l.Resource,
-			&l.Detail, &l.IP, &l.UserAgent, &l.CreatedAt); err != nil {
+			&l.Detail, &l.IP, &l.UserAgent, &createdAt); err != nil {
 			return nil, err
 		}
+		l.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
+func (db *DB) GetDeployEvents(limit int) ([]*models.AuditLog, error) {
+	rows, err := db.Query(
+		`SELECT id, user_id, action, resource, detail, ip, user_agent, created_at
+		 FROM audit_logs WHERE action = 'deploy' ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []*models.AuditLog
+	for rows.Next() {
+		l := &models.AuditLog{}
+		var createdAt string
+		if err := rows.Scan(&l.ID, &l.UserID, &l.Action, &l.Resource,
+			&l.Detail, &l.IP, &l.UserAgent, &createdAt); err != nil {
+			return nil, err
+		}
+		l.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
 		logs = append(logs, l)
 	}
 	return logs, nil

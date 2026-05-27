@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/4rch3/portal/internal/database"
+	"github.com/4rch3/portal/internal/metrics"
 	"github.com/4rch3/portal/internal/models"
 )
 
@@ -135,6 +136,8 @@ func (m *Monitor) CheckService(ctx context.Context, svc *models.Service) {
 			break
 		}
 	}
+
+	metrics.HealthCheckResults.WithLabelValues(svc.Name, lastStatus).Inc()
 
 	if err := m.db.UpdateServiceStatus(svc.ID, lastStatus, lastLatency); err != nil {
 		slog.Error("health monitor: status update error", "service", svc.Name, "error", err)

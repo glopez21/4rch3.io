@@ -8,18 +8,20 @@ import (
 
 	"github.com/4rch3/portal/internal/auth"
 	"github.com/4rch3/portal/internal/database"
+	"github.com/4rch3/portal/internal/metrics"
 	"github.com/4rch3/portal/internal/middleware"
 	"github.com/4rch3/portal/internal/models"
 )
 
 type AuthHandler struct {
-	db        *database.DB
-	authSvc   *auth.Service
-	cfg       auth.AuthConfig
+	db            *database.DB
+	authSvc       *auth.Service
+	sessionCookie string
+	sessionExpiry time.Duration
 }
 
-func NewAuthHandler(db *database.DB, authSvc *auth.Service, cfg auth.AuthConfig) *AuthHandler {
-	return &AuthHandler{db: db, authSvc: authSvc, cfg: cfg}
+func NewAuthHandler(db *database.DB, authSvc *auth.Service, sessionCookie string, sessionExpiry time.Duration) *AuthHandler {
+	return &AuthHandler{db: db, authSvc: authSvc, sessionCookie: sessionCookie, sessionExpiry: sessionExpiry}
 }
 
 type loginRequest struct {
@@ -53,10 +55,23 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	} else {
 		req.Username = r.FormValue("username")
 		req.Password = r.FormValue("password")
+
+		csrfToken := r.FormValue("csrf_token")
+		if csrfToken == "" || !h.authSvc.ValidateCSRFToken(csrfToken, "", 15*time.Minute) {
+			slog.Warn("csrf validation failed", "username", req.Username)
+			if r.Header.Get("HX-Request") != "" {
+				w.Header().Set("HX-Retarget", "#login-error")
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid request"})
+				return
+			}
+			writeJSON(w, http.StatusUnauthorized, loginResponse{Error: "invalid request"})
+			return
+		}
 	}
 
 	user, err := h.authSvc.Authenticate(req.Username, req.Password)
 	if err != nil {
+		metrics.AuthAttempts.WithLabelValues("failure").Inc()
 		slog.Warn("login failed", "username", req.Username, "error", err)
 		if r.Header.Get("HX-Request") != "" {
 			w.Header().Set("HX-Retarget", "#login-error")
@@ -67,6 +82,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	metrics.AuthAttempts.WithLabelValues("success").Inc()
+
 	ip := h.getIP(r)
 	h.db.UpdateUserLogin(user.ID, ip)
 
@@ -76,11 +93,17 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionID, err := auth.GenerateSessionToken()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, loginResponse{Error: "internal error"})
+		return
+	}
+
 	session := &models.Session{
-		ID:        sessionToken,
+		ID:        sessionID,
 		UserID:    user.ID,
 		Token:     sessionToken,
-		ExpiresAt: time.Now().Add(h.cfg.SessionExpiry),
+		ExpiresAt: time.Now().Add(h.sessionExpiry),
 		IP:        ip,
 		UserAgent: r.UserAgent(),
 	}
@@ -98,13 +121,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
-		Name:     h.cfg.SessionCookieName,
+		Name:     h.sessionCookie,
 		Value:    sessionToken,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(h.cfg.SessionExpiry.Seconds()),
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(h.sessionExpiry.Seconds()),
 	})
 
 	if r.Header.Get("HX-Request") != "" {
@@ -122,13 +145,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(h.cfg.SessionCookieName)
+	cookie, err := r.Cookie(h.sessionCookie)
 	if err == nil {
 		h.db.DeleteSession(cookie.Value)
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     h.cfg.SessionCookieName,
+		Name:     h.sessionCookie,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
@@ -150,8 +173,15 @@ func (h *AuthHandler) renderLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	csrfToken, err := h.authSvc.GenerateCSRFToken("")
+	if err != nil {
+		slog.Error("failed to generate csrf token", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	loginTmpl.Execute(w, nil)
+	loginTmpl.Execute(w, map[string]string{"CSRFToken": csrfToken})
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {

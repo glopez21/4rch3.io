@@ -17,6 +17,7 @@ import (
 	"github.com/4rch3/portal/internal/database"
 	"github.com/4rch3/portal/internal/discovery"
 	"github.com/4rch3/portal/internal/handlers"
+	"github.com/4rch3/portal/internal/metrics"
 	"github.com/4rch3/portal/internal/middleware"
 	"github.com/4rch3/portal/internal/models"
 	"github.com/4rch3/portal/internal/monitor"
@@ -37,6 +38,11 @@ func main() {
 
 	overrideFromEnv(cfg)
 
+	if err := cfg.Validate(); err != nil {
+		slog.Error("invalid config", "error", err)
+		os.Exit(1)
+	}
+
 	setupLogging(cfg.Logging)
 
 	if err := os.MkdirAll("data", 0755); err != nil {
@@ -56,13 +62,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	authSvc := auth.New(auth.AuthConfig{
-		JWTSecret:         cfg.Auth.JWTSecret,
-		JWTExpiry:         cfg.Auth.JWTExpiry,
-		SessionExpiry:     cfg.Auth.SessionExpiry,
-		BCryptCost:        cfg.Auth.BCryptCost,
-		SessionCookieName: cfg.Auth.SessionCookieName,
-	})
+	authSvc := auth.New(cfg.Auth.JWTSecret, cfg.Auth.JWTExpiry, cfg.Auth.BCryptCost, cfg.Auth.SessionCookieName)
 
 	svc := auth.NewService(authSvc, db)
 
@@ -78,7 +78,7 @@ func main() {
 
 	tryBootstrapFromEnv(svc)
 
-	mw, err := middleware.New(svc, cfg.Server.LANSubnets, cfg.Server.TrustedProxies)
+	mw, err := middleware.New(svc, cfg.Server.LANSubnets, cfg.Server.TrustedProxies, cfg.Auth.SessionCookieName)
 	if err != nil {
 		slog.Error("failed to create middleware", "error", err)
 		os.Exit(1)
@@ -86,14 +86,9 @@ func main() {
 
 	proxySvc := proxy.New(db)
 
-	authHandler := handlers.NewAuthHandler(db, svc, auth.AuthConfig{
-		JWTSecret:         cfg.Auth.JWTSecret,
-		JWTExpiry:         cfg.Auth.JWTExpiry,
-		SessionExpiry:     cfg.Auth.SessionExpiry,
-		BCryptCost:        cfg.Auth.BCryptCost,
-		SessionCookieName: cfg.Auth.SessionCookieName,
-	})
-	dashHandler := handlers.NewDashboardHandler(db)
+	authHandler := handlers.NewAuthHandler(db, svc, cfg.Auth.SessionCookieName, cfg.Auth.SessionExpiry)
+	grafanaDomain := domainFromURL(cfg.Server.ExternalURL)
+	dashHandler := handlers.NewDashboardHandler(db, grafanaDomain)
 	adminHandler := handlers.NewAdminHandler(db, svc)
 
 	authLimiter := middleware.NewRateLimiter(rate.Limit(cfg.Auth.RateLimitPerMin)/60, 1)
@@ -101,6 +96,46 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				n, err := db.DeleteExpiredSessions()
+				if err != nil {
+					slog.Warn("session cleanup failed", "error", err)
+				} else if n > 0 {
+					slog.Debug("cleaned expired sessions", "count", n)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				services, err := db.ListServices()
+				if err == nil {
+					var active float64
+					for _, svc := range services {
+						if svc.Enabled {
+							active++
+						}
+					}
+					metrics.ActiveServices.Set(active)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	if cfg.Discovery.DockerSocket != "" {
 		dockerDisc, err := discovery.NewDockerDiscovery(
@@ -144,10 +179,19 @@ func main() {
 		w.Write([]byte(`{"status":"ok","service":"4rch3-portal"}`))
 	})
 
+	mux.Handle("/metrics", metrics.Handler())
+
+	webhookHandler := handlers.NewWebhookHandler(db)
+	mux.HandleFunc("/api/webhook/deploy", webhookHandler.Deploy)
+	mux.HandleFunc("/api/deploys", webhookHandler.RecentDeploys)
+
+	mux.Handle("/api/deploy-panel", mw.RequireAuth(http.HandlerFunc(dashHandler.DeployPanel)))
+
 	mux.Handle("/", http.HandlerFunc(dashHandler.Index))
 
 	var finalHandler http.Handler = mux
 
+	finalHandler = metrics.Instrument(finalHandler)
 	finalHandler = middleware.CORSMiddleware(cfg.CORS)(finalHandler)
 	finalHandler = mw.Authenticate(finalHandler)
 	finalHandler = mw.LANDetect(finalHandler)
@@ -328,4 +372,26 @@ func handleResetPassword(svc *auth.Service, authSvc *auth.Auth) {
 	}
 
 	fmt.Printf("password reset for user %q (id=%d)\n", target.Username, target.ID)
+}
+
+func domainFromURL(raw string) string {
+	if raw == "" {
+		return "homelab.local"
+	}
+	// strip scheme
+	domain := raw
+	for _, prefix := range []string{"https://", "http://"} {
+		if len(domain) > len(prefix) && domain[:len(prefix)] == prefix {
+			domain = domain[len(prefix):]
+			break
+		}
+	}
+	// strip path
+	for i := 0; i < len(domain); i++ {
+		if domain[i] == '/' || domain[i] == ':' {
+			domain = domain[:i]
+			break
+		}
+	}
+	return domain
 }

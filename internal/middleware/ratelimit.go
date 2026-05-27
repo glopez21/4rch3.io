@@ -62,7 +62,11 @@ func (rl *RateLimiter) cleanup() {
 	for {
 		time.Sleep(10 * time.Minute)
 		rl.mu.Lock()
-		rl.visitors = make(map[string]*rate.Limiter)
+		for key, limiter := range rl.visitors {
+			if limiter.Tokens() == float64(rl.burst) {
+				delete(rl.visitors, key)
+			}
+		}
 		rl.mu.Unlock()
 	}
 }

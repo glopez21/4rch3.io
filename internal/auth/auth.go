@@ -14,24 +14,26 @@ import (
 	"github.com/4rch3/portal/internal/models"
 )
 
-type AuthConfig struct {
-	JWTSecret          string
-	JWTExpiry          time.Duration
-	SessionExpiry      time.Duration
-	BCryptCost         int
-	SessionCookieName  string
-}
-
 type Auth struct {
-	cfg AuthConfig
+	jwtSecret         string
+	jwtExpiry         time.Duration
+	bcryptCost        int
+	sessionCookieName string
 }
 
-func New(cfg AuthConfig) *Auth {
-	return &Auth{cfg: cfg}
+func New(jwtSecret string, jwtExpiry time.Duration, bcryptCost int, sessionCookieName string) *Auth {
+	return &Auth{
+		jwtSecret:         jwtSecret,
+		jwtExpiry:         jwtExpiry,
+		bcryptCost:        bcryptCost,
+		sessionCookieName: sessionCookieName,
+	}
 }
+
+func (a *Auth) SessionCookieName() string { return a.sessionCookieName }
 
 func (a *Auth) HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), a.cfg.BCryptCost)
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), a.bcryptCost)
 	if err != nil {
 		return "", fmt.Errorf("hash password: %w", err)
 	}
@@ -56,14 +58,14 @@ func (a *Auth) GenerateJWT(user *models.User) (string, error) {
 		Username: user.Username,
 		Role:     user.Role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(a.cfg.JWTExpiry)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(a.jwtExpiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			Issuer:    "4rch3.io",
 		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString([]byte(a.cfg.JWTSecret))
+	signed, err := token.SignedString([]byte(a.jwtSecret))
 	if err != nil {
 		return "", fmt.Errorf("sign jwt: %w", err)
 	}
@@ -75,7 +77,7 @@ func (a *Auth) ValidateJWT(tokenString string) (*Claims, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
-		return []byte(a.cfg.JWTSecret), nil
+		return []byte(a.jwtSecret), nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("parse jwt: %w", err)

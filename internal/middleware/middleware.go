@@ -36,13 +36,14 @@ func IsLAN(r *http.Request) bool {
 }
 
 type Middleware struct {
-	authService  *auth.Service
-	lanSubnets   []*net.IPNet
+	authService    *auth.Service
+	lanSubnets     []*net.IPNet
 	trustedProxies []*net.IPNet
+	sessionCookie  string
 }
 
-func New(authService *auth.Service, lanCIDRs, trustedCIDRs []string) (*Middleware, error) {
-	m := &Middleware{authService: authService}
+func New(authService *auth.Service, lanCIDRs, trustedCIDRs []string, sessionCookie string) (*Middleware, error) {
+	m := &Middleware{authService: authService, sessionCookie: sessionCookie}
 
 	for _, cidr := range lanCIDRs {
 		_, network, err := net.ParseCIDR(cidr)
@@ -103,6 +104,12 @@ func (m *Middleware) LANDetect(next http.Handler) http.Handler {
 	})
 }
 
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write([]byte(`{"error":"` + msg + `"}`))
+}
+
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := GetUser(r)
@@ -124,7 +131,7 @@ func (m *Middleware) RequireRole(roles ...models.Role) func(http.Handler) http.H
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user := GetUser(r)
 			if user == nil {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 			for _, role := range roles {
@@ -133,7 +140,7 @@ func (m *Middleware) RequireRole(roles ...models.Role) func(http.Handler) http.H
 					return
 				}
 			}
-			http.Error(w, "forbidden", http.StatusForbidden)
+			writeJSONError(w, http.StatusForbidden, "forbidden")
 		})
 	}
 }
@@ -143,7 +150,7 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 		var token string
 		var fromCookie bool
 
-		if cookie, err := r.Cookie("4rch3_session"); err == nil {
+		if cookie, err := r.Cookie(m.sessionCookie); err == nil {
 			token = cookie.Value
 			fromCookie = true
 		}

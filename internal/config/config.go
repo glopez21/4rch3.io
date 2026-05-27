@@ -137,3 +137,37 @@ func Load(path string) (*Config, error) {
 
 	return cfg, nil
 }
+
+func (c *Config) Validate() error {
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)
+	}
+	if c.Auth.JWTSecret == "" || c.Auth.JWTSecret == "change-me-in-production" || c.Auth.JWTSecret == "CHANGE-ME-IN-PRODUCTION-USE-A-STRONG-RANDOM-SECRET" {
+		return fmt.Errorf("auth.jwt_secret must be set to a non-default value in production")
+	}
+	if c.Auth.JWTExpiry <= 0 {
+		return fmt.Errorf("auth.jwt_expiry must be positive, got %v", c.Auth.JWTExpiry)
+	}
+	if c.Auth.SessionExpiry <= 0 {
+		return fmt.Errorf("auth.session_expiry must be positive, got %v", c.Auth.SessionExpiry)
+	}
+	if c.Auth.BCryptCost < 4 || c.Auth.BCryptCost > 31 {
+		return fmt.Errorf("auth.bcrypt_cost must be between 4 and 31, got %d", c.Auth.BCryptCost)
+	}
+	if c.Auth.RateLimitPerMin < 1 {
+		return fmt.Errorf("auth.rate_limit_per_min must be at least 1, got %d", c.Auth.RateLimitPerMin)
+	}
+	if c.Auth.APIRateLimitPerMin < 1 {
+		return fmt.Errorf("auth.api_rate_limit_per_min must be at least 1, got %d", c.Auth.APIRateLimitPerMin)
+	}
+	if c.Monitor.CheckInterval <= 0 {
+		return fmt.Errorf("monitor.check_interval must be positive, got %v", c.Monitor.CheckInterval)
+	}
+	if c.Monitor.Timeout <= 0 {
+		return fmt.Errorf("monitor.timeout must be positive, got %v", c.Monitor.Timeout)
+	}
+	if c.Discovery.ScanInterval <= 0 {
+		return fmt.Errorf("discovery.scan_interval must be positive, got %v", c.Discovery.ScanInterval)
+	}
+	return nil
+}

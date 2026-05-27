@@ -8,9 +8,19 @@ import (
 )
 
 type DashboardData struct {
-	Authenticated bool
-	IsLAN         bool
-	Services      []ServiceCardData
+	Authenticated  bool
+	IsLAN          bool
+	Services       []ServiceCardData
+	Deploys        []DeployRecordData
+	GrafanaDomain  string
+}
+
+type DeployRecordData struct {
+	Service   string
+	Status    string
+	SHA       string
+	Timestamp string
+	StatusBadge string
 }
 
 type ServiceCardData struct {
@@ -82,6 +92,36 @@ func toServiceCards(services []*models.Service) []ServiceCardData {
 		cards = append(cards, card)
 	}
 	return cards
+}
+
+func toDeployRecords(logs []*models.AuditLog) []DeployRecordData {
+	records := make([]DeployRecordData, 0, len(logs))
+	for _, l := range logs {
+		status := "unknown"
+		badge := "bg-gray-700 text-gray-300"
+		if len(l.Detail) >= 9 && l.Detail[:7] == "status=" {
+			end := 7
+			for end < len(l.Detail) && l.Detail[end] != ' ' {
+				end++
+			}
+			status = l.Detail[7:end]
+			switch status {
+			case "success":
+				badge = "bg-green-900/50 text-green-400"
+			case "failure":
+				badge = "bg-red-900/50 text-red-400"
+			case "cancelled":
+				badge = "bg-yellow-900/50 text-yellow-400"
+			}
+		}
+		records = append(records, DeployRecordData{
+			Service:     l.Resource,
+			Status:      status,
+			Timestamp:   l.CreatedAt.Format("15:04:05"),
+			StatusBadge: badge,
+		})
+	}
+	return records
 }
 
 func statusColor(status string) string {
@@ -168,7 +208,7 @@ var loginTmpl = template.Must(template.New("login").Parse(`<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - 4rch3.io</title>
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-7uoN2oWEkBN1YI9ZOKj1jF3OGfC2jqF6elWMrbFU+dxl3NTah3MsiGZ+36I96u7Y" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     ` + tailwindConfig + `
     <style>
@@ -196,6 +236,8 @@ var loginTmpl = template.Must(template.New("login").Parse(`<!DOCTYPE html>
         <div class="bg-gray-900/80 backdrop-blur-xl rounded-2xl p-8 border border-gray-800 glow-border">
             <form hx-post="/login" hx-target="this" hx-swap="outerHTML" class="space-y-6">
                 <div id="login-error" class="text-red-400 text-sm text-center"></div>
+
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 
                 <div>
                     <label class="block text-sm font-medium text-gray-400 mb-2">Username</label>
@@ -231,7 +273,7 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>4rch3.io</title>
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-7uoN2oWEkBN1YI9ZOKj1jF3OGfC2jqF6elWMrbFU+dxl3NTah3MsiGZ+36I96u7Y" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     ` + tailwindConfig + `
     ` + baseStyle + `
@@ -323,17 +365,61 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
         {{end}}
         </div>
 
-        <div class="mt-12 border-t border-gray-800 pt-8 text-center">
+        <div class="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-gray-900/50 border border-gray-800 rounded-2xl p-6">
+                <h3 class="text-lg font-semibold text-white mb-4">Recent Deployments</h3>
+                <div id="deploy-panel" hx-get="/api/deploy-panel" hx-trigger="load" hx-swap="innerHTML">
+                    <div class="space-y-2">
+                    {{range .Deploys}}
+                        <div class="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
+                            <div class="flex items-center gap-2">
+                                <span class="text-gray-200 text-sm">{{.Service}}</span>
+                                <span class="text-xs {{.StatusBadge}} px-2 py-0.5 rounded-full">{{.Status}}</span>
+                            </div>
+                            <span class="text-gray-500 text-xs font-mono">{{.Timestamp}}</span>
+                        </div>
+                    {{else}}
+                        <p class="text-gray-500 text-sm">no deployments yet</p>
+                    {{end}}
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-900/50 border border-gray-800 rounded-2xl p-6">
+                <h3 class="text-lg font-semibold text-white mb-4">Logs & Monitoring</h3>
+                <div class="space-y-4">
+                    <p class="text-gray-500 text-sm">Centralized logging via Loki. View, search, and filter logs from all services in Grafana.</p>
+                    <div class="flex flex-wrap gap-3">
+                        <a href="https://grafana.{{.GrafanaDomain}}/explore?orgId=1&left=%7B%22datasource%22:%22Loki%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22expr%22:%22%7Bcompose_project%3D~%60.%2B%60%7D%20%7C%3D%20%60%60%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
+                           target="_blank"
+                           class="px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-gray-300 hover:text-white hover:border-gray-600 transition-all text-sm text-center inline-flex items-center gap-2">
+                            <span>Explore Logs</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                        <a href="https://prometheus.{{.GrafanaDomain}}/targets"
+                           target="_blank"
+                           class="px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-gray-300 hover:text-white hover:border-gray-600 transition-all text-sm text-center inline-flex items-center gap-2">
+                            <span>Prometheus Targets</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-8 border-t border-gray-800 pt-8 text-center">
             <h3 class="text-lg font-semibold text-white mb-4">Quick Links</h3>
             <div class="inline-flex flex-wrap justify-center gap-3">
                 <a href="/admin" class="px-4 py-3 bg-gray-900/50 border border-gray-800 rounded-xl text-gray-400 hover:text-white hover:border-gray-700 transition-all text-sm text-center">
                     admin panel
                 </a>
-                <a href="#" class="px-4 py-3 bg-gray-900/50 border border-gray-800 rounded-xl text-gray-400 hover:text-white hover:border-gray-700 transition-all text-sm text-center">
-                    documentation
-                </a>
                 <a href="/status" class="px-4 py-3 bg-gray-900/50 border border-gray-800 rounded-xl text-gray-400 hover:text-white hover:border-gray-700 transition-all text-sm text-center">
                     system status
+                </a>
+                <a href="https://grafana.{{.GrafanaDomain}}"
+                   target="_blank"
+                   class="px-4 py-3 bg-gray-900/50 border border-gray-800 rounded-xl text-gray-400 hover:text-white hover:border-gray-700 transition-all text-sm text-center">
+                    grafana
                 </a>
             </div>
         </div>
@@ -342,10 +428,20 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
     <script>
         htmx.onLoad(function() {
             htmx.ajax('GET', '/api/services/status', { target: '#services-grid', swap: 'innerHTML' });
+            htmx.ajax('GET', '/api/deploy-panel', { target: '#deploy-panel', swap: 'innerHTML' });
         });
     </script>
 </body>
 </html>`))
+
+var deployPanelTmpl = template.Must(template.New("deployPanel").Parse(
+	`{{range .}}<div class="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
+		<div class="flex items-center gap-2">
+			<span class="text-gray-200 text-sm">{{.Service}}</span>
+			<span class="text-xs {{.StatusBadge}} px-2 py-0.5 rounded-full">{{.Status}}</span>
+		</div>
+		<span class="text-gray-500 text-xs font-mono">{{.Timestamp}}</span>
+	</div>{{end}}`))
 
 var serviceCardTmpl = template.Must(template.New("serviceCard").Parse(
 	`{{range .}}<div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5">
@@ -372,7 +468,7 @@ var adminTmpl = template.Must(template.New("admin").Parse(`<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - 4rch3.io</title>
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-7uoN2oWEkBN1YI9ZOKj1jF3OGfC2jqF6elWMrbFU+dxl3NTah3MsiGZ+36I96u7Y" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     ` + tailwindConfig + `
     ` + baseStyle + `
