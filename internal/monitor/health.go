@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"crypto/tls"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -32,9 +33,12 @@ func New(db *database.DB, interval, timeout time.Duration, retries int) *Monitor
 		client: &http.Client{
 			Timeout: timeout,
 			Transport: &http.Transport{
-				MaxIdleConns:        20,
-				IdleConnTimeout:     30 * time.Second,
-				DisableKeepAlives:   false,
+				MaxIdleConns:      20,
+				IdleConnTimeout:   30 * time.Second,
+				DisableKeepAlives: false,
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
 			},
 		},
 	}
@@ -104,11 +108,11 @@ func (m *Monitor) CheckService(ctx context.Context, svc *models.Service) {
 			lastLatency = latency
 			lastErr = err.Error()
 			slog.Warn("health monitor: service offline",
-					"service", svc.Name,
-					"error", err,
-					"attempt", attempt+1,
-					"max_attempts", m.retries+1,
-				)
+				"service", svc.Name,
+				"error", err,
+				"attempt", attempt+1,
+				"max_attempts", m.retries+1,
+			)
 			if attempt < m.retries {
 				time.Sleep(1 * time.Second)
 				continue

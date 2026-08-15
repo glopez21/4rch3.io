@@ -253,7 +253,8 @@ func (db *DB) CreateService(svc *models.Service) (int64, error) {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(name) DO UPDATE SET
 		 display_name=excluded.display_name, url=excluded.url, internal_url=excluded.internal_url,
-		 icon=excluded.icon, docker_id=excluded.docker_id, docker_name=excluded.docker_name,
+		 icon=excluded.icon, category=excluded.category, group_name=excluded.group_name,
+		 health_path=excluded.health_path, docker_id=excluded.docker_id, docker_name=excluded.docker_name,
 		 updated_at=datetime('now')`,
 		svc.Name, svc.DisplayName, svc.Description, svc.URL, svc.InternalURL, svc.Icon,
 		svc.Category, svc.Group, svc.HealthPath, svc.Type, svc.DockerID, svc.DockerName,
