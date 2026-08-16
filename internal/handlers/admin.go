@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/4rch3/portal/internal/auth"
 	"github.com/4rch3/portal/internal/database"
@@ -24,6 +26,13 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUser(r)
 	if user == nil || user.Role != models.RoleAdmin {
 		writeErrorJSON(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	csrfToken, err := h.authSvc.GenerateCSRFToken("")
+	if err != nil {
+		slog.Error("failed to generate admin csrf token", "error", err)
+		writeErrorJSON(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -85,6 +94,7 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		Users:         userData,
 		Services:      serviceData,
 		Logs:          logData,
+		CSRFToken:     csrfToken,
 	}
 	adminTmpl.Execute(w, data)
 }
@@ -107,23 +117,36 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 
 	case "POST":
 		var req struct {
-			Username string      `json:"username"`
-			Email    string      `json:"email"`
-			Password string      `json:"password"`
-			Role     models.Role `json:"role"`
+			Username  string      `json:"username"`
+			Email     string      `json:"email"`
+			Password  string      `json:"password"`
+			Role      models.Role `json:"role"`
+			CSRFToken string      `json:"csrf_token"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 			return
 		}
+		if req.CSRFToken == "" || !h.authSvc.ValidateCSRFToken(req.CSRFToken, "", 15*time.Minute) {
+			slog.Warn("admin csrf validation failed", "action", "create_user", "username", req.Username)
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid request"})
+			return
+		}
 		_, err := h.authSvc.CreateUser(req.Username, req.Email, req.Password, req.Role)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			slog.Error("failed to create user", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create user"})
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
 
 	case "DELETE":
+		csrfToken := r.Header.Get("X-CSRF-Token")
+		if csrfToken == "" || !h.authSvc.ValidateCSRFToken(csrfToken, "", 15*time.Minute) {
+			slog.Warn("admin csrf validation failed", "action", "delete_user")
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid request"})
+			return
+		}
 		idStr := r.URL.Query().Get("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
@@ -131,7 +154,8 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := h.db.DeleteUser(id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			slog.Error("failed to delete user", "id", id, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete user"})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})

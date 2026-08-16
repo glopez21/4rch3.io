@@ -6,8 +6,8 @@ import (
 )
 
 type apiError struct {
-	Error   string `json:"error"`
-	Status  int    `json:"-"`
+	Error  string `json:"error"`
+	Status int    `json:"-"`
 }
 
 func writeErrorJSON(w http.ResponseWriter, status int, message string) {

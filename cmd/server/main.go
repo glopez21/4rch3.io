@@ -22,6 +22,7 @@ import (
 	"github.com/4rch3/portal/internal/models"
 	"github.com/4rch3/portal/internal/monitor"
 	"github.com/4rch3/portal/internal/proxy"
+	"github.com/4rch3/portal/web/static"
 	"golang.org/x/time/rate"
 )
 
@@ -91,7 +92,7 @@ func main() {
 	dashHandler := handlers.NewDashboardHandler(db, grafanaDomain)
 	adminHandler := handlers.NewAdminHandler(db, svc)
 
-	authLimiter := middleware.NewRateLimiter(rate.Limit(cfg.Auth.RateLimitPerMin)/60, 1)
+	authLimiter := middleware.NewRateLimiter(rate.Limit(cfg.Auth.RateLimitPerMin)/60, 3)
 	apiLimiter := middleware.NewRateLimiter(rate.Limit(cfg.Auth.APIRateLimitPerMin)/60, 5)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -169,6 +170,7 @@ func main() {
 	mux.Handle("/api/services/status", apiLimiter.Middleware(mw.RequireAuth(http.HandlerFunc(dashHandler.ServiceStatus))))
 	mux.Handle("/admin", mw.RequireAuth(mw.RequireRole("admin")(http.HandlerFunc(adminHandler.Dashboard))))
 	mux.Handle("/admin/users", mw.RequireAuth(mw.RequireRole("admin")(http.HandlerFunc(adminHandler.Users))))
+	mux.HandleFunc("/api/auth/csrf", authHandler.CSRFToken)
 
 	mux.Handle("/svc/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxySvc.Handler().ServeHTTP(w, r)
@@ -179,11 +181,22 @@ func main() {
 		w.Write([]byte(`{"status":"ok","service":"4rch3-portal"}`))
 	})
 
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(static.FaviconSVG)
+	})
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(static.FaviconSVG)
+	})
+
 	mux.Handle("/metrics", metrics.Handler())
 
 	webhookHandler := handlers.NewWebhookHandler(db)
-	mux.HandleFunc("/api/webhook/deploy", webhookHandler.Deploy)
-	mux.HandleFunc("/api/deploys", webhookHandler.RecentDeploys)
+	mux.Handle("/api/webhook/deploy", apiLimiter.Middleware(mw.RequireAuth(http.HandlerFunc(webhookHandler.Deploy))))
+	mux.Handle("/api/deploys", apiLimiter.Middleware(mw.RequireAuth(http.HandlerFunc(webhookHandler.RecentDeploys))))
 
 	mux.Handle("/api/deploy-panel", mw.RequireAuth(http.HandlerFunc(dashHandler.DeployPanel)))
 

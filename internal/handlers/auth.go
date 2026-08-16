@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -50,6 +51,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") == "application/json" {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, loginResponse{Error: "invalid request"})
+			return
+		}
+		csrfToken := r.Header.Get("X-CSRF-Token")
+		if csrfToken == "" || !h.authSvc.ValidateCSRFToken(csrfToken, "", 15*time.Minute) {
+			slog.Warn("csrf validation failed on json login", "username", req.Username)
+			writeJSON(w, http.StatusUnauthorized, loginResponse{Error: "invalid request"})
 			return
 		}
 	} else {
@@ -120,13 +127,22 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	if !secure {
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		ip := net.ParseIP(host)
+		local := ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+		if local {
+			secure = false
+		}
+	}
+	slog.Info("login success", "username", user.Username, "secure_cookie", secure, "remote_addr", r.RemoteAddr, "hx_request", r.Header.Get("HX-Request"))
 	http.SetCookie(w, &http.Cookie{
 		Name:     h.sessionCookie,
 		Value:    sessionToken,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(h.sessionExpiry.Seconds()),
 	})
 
@@ -150,12 +166,19 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		h.db.DeleteSession(cookie.Value)
 	}
 
+	logoutSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	if !logoutSecure {
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+			logoutSecure = false
+		}
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     h.sessionCookie,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		Secure:   logoutSecure,
 		MaxAge:   -1,
 	})
 
@@ -197,6 +220,22 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"email":    user.Email,
 		"role":     user.Role,
 	})
+}
+
+func (h *AuthHandler) CSRFToken(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUser(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	token, err := h.authSvc.GenerateCSRFToken("")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"csrf_token": token})
 }
 
 func (h *AuthHandler) getIP(r *http.Request) string {

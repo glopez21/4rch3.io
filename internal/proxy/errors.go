@@ -13,11 +13,11 @@ type proxyError struct {
 func (e *proxyError) Error() string { return e.message }
 
 var (
-	errUnauthorized       = &proxyError{http.StatusUnauthorized, "unauthorized"}
+	errUnauthorized        = &proxyError{http.StatusUnauthorized, "unauthorized"}
 	errServiceNotSpecified = &proxyError{http.StatusBadRequest, "service not specified"}
-	errServiceNotFound    = &proxyError{http.StatusNotFound, "service not found"}
-	errInvalidTarget      = &proxyError{http.StatusInternalServerError, "invalid target"}
-	errInternal           = &proxyError{http.StatusInternalServerError, "internal error"}
+	errServiceNotFound     = &proxyError{http.StatusNotFound, "service not found"}
+	errInvalidTarget       = &proxyError{http.StatusInternalServerError, "invalid target"}
+	errInternal            = &proxyError{http.StatusInternalServerError, "internal error"}
 )
 
 type errorResponse struct {

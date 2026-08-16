@@ -16,7 +16,7 @@ database:
   path: "data/portal.db"
 
 auth:
-  jwt_secret: "CHANGE-ME-IN-PRODUCTION-USE-A-STRONG-RANDOM-SECRET"
+  jwt_secret: "MUST-BE-SET-VIA-PORTAL_JWT_SECRET-ENV-VAR"
   jwt_expiry: 24h
   session_expiry: 720h
   bcrypt_cost: 12

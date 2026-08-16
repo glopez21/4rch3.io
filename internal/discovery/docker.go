@@ -70,13 +70,13 @@ func (d *DockerDiscovery) Start(ctx context.Context) {
 }
 
 type dockerContainer struct {
-	ID     string            `json:"Id"`
-	Names  []string          `json:"Names"`
-	Image  string            `json:"Image"`
-	State  string            `json:"State"`
-	Status string            `json:"Status"`
-	Labels map[string]string `json:"Labels"`
-	Ports  []dockerPort      `json:"Ports"`
+	ID              string            `json:"Id"`
+	Names           []string          `json:"Names"`
+	Image           string            `json:"Image"`
+	State           string            `json:"State"`
+	Status          string            `json:"Status"`
+	Labels          map[string]string `json:"Labels"`
+	Ports           []dockerPort      `json:"Ports"`
 	NetworkSettings *struct {
 		Networks map[string]dockerNetwork `json:"Networks"`
 	} `json:"NetworkSettings,omitempty"`

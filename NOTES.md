@@ -149,6 +149,25 @@ go run ./cmd/server
   JWTs. The `Authenticate` middleware routes cookie tokens through
   `db.GetSession()` → `db.GetUserByID()`. Bearer tokens go through
   `ValidateJWT()`. API keys go through `ValidateAPIKey()`.
+- **Cookie Secure flag on HTTP:** When accessing via plain HTTP (localhost or
+  LAN), `Secure` cookies are silently dropped by browsers. Fixed: cookies are
+  set with `Secure=false` when the remote address is loopback or private IP.
+  Behind Traefik, `X-Forwarded-Proto: https` correctly sets `Secure=true`.
+- **SameSite=LaxMode:** Session cookies use `LaxMode` (not `StrictMode`). `Strict`
+  blocks the cookie on the post-login redirect, causing infinite login loops.
+  `Lax` still prevents CSRF on POST/DELETE while allowing top-level GET redirects.
+- **Disabled user access:** Session and JWT auth paths now check `user.Active`
+  and reject disabled users. API key path already filtered via `AND active = 1`.
+- **Unauthenticated webhook:** `/api/webhook/deploy` now requires auth + rate limit.
+- **JSON login CSRF:** JSON login requests must include `X-CSRF-Token` header.
+- **Auth rate limiter:** Burst increased from 1 to 3 to avoid throttling
+  legitimate login retries after failed attempt.
+
+## Security Audit (2026-05-27)
+
+Full codebase audit performed. 3 critical, 4 high, and 6 medium-severity issues
+identified. All 3 critical issues and 1 medium issue (X-Forwarded-For injection)
+fixed immediately. Remaining open issues tracked in ISSUES.md #31–#42.
 
 ## Deployment (Docker)
 
@@ -183,6 +202,39 @@ The following were implemented to close the gap between config.yaml and actual r
 - [x] **AuthConfig deduplication** — removed duplicated struct; individual constructor params
 - [x] **Hardcoded cookie name** — middleware now reads from config
 - [x] **SQLite time scan fix** — TEXT columns scanned as string, parsed with `time.Parse`
+- [x] **WebSocket proxy Hijacker fix** — `responseWriter` in both metrics and middleware
+  packages now implement `http.Hijacker` and `http.Flusher` by delegating to the
+  underlying `ResponseWriter`. Without this, all WebSocket connections failed with
+  "hijacking not supported" because the wrapped writer didn't support connection hijack.
+- [x] **WebSocket scheme fix** — `handleWebSocket` now computes `wsScheme` from the original
+  `target.Scheme` instead of overwriting it (which broke `wss://` and poisoned the shared
+  `url.URL`). Also sets `r.Host` and `r.URL.Scheme` on the upgrade request.
+- [x] **realIP() security rewrite** — only trusts `X-Forwarded-For` and `X-Real-IP` when
+  `r.RemoteAddr` is a trusted proxy. Walks XFF right-to-left to find the first non-trusted
+  IP. Eliminates the previous bug where `realIP()` returned the proxy's own IP and blindly
+  trusted `X-Real-IP`, enabling LAN-bypass auth exploits.
+- [x] **X-Forwarded-For strip** — `setForwardingHeaders` now strips `X-Forwarded-For`
+  before setting the client IP, preventing client-injected IP chains from reaching backends.
+- [x] **Disabled user access bypass** — `Authenticate` middleware now checks `user.Active`
+  in both session and JWT paths. Inactive users have their session deleted and are
+  treated as unauthenticated. API key path already checked `active = 1` in SQL.
+- [x] **Unauthenticated webhook** — `/api/webhook/deploy` and `/api/deploys` now require
+  authentication via `RequireAuth` middleware + API rate limiter.
+- [x] **JSON login CSRF bypass** — JSON login requests must include `X-CSRF-Token`
+  header, validated via the same HMAC-SHA256 mechanism as form-based login.
+- [x] **Admin CSRF protection** — Admin POST (create user) requires `csrf_token` in
+  JSON body; DELETE requires `X-CSRF-Token` header. Admin dashboard embeds CSRF token
+  in `<meta name="csrf-token">`. Added `/api/auth/csrf` endpoint for JSON clients.
+- [x] **Admin error message leaking** — Replaced raw `err.Error()` with generic messages;
+  original errors logged server-side via `slog.Error`.
+- [x] **Cookie Secure flag on HTTP** — Session and logout cookies now force `Secure=false`
+  when the client is a loopback or private IP address (no TLS, no proxy). Behind
+  Traefik with `X-Forwarded-Proto: https`, cookies correctly get `Secure=true`.
+- [x] **SameSite=Lax for session cookie** — Changed from `StrictMode` to `LaxMode`.
+  `Strict` blocks the cookie on post-login GET redirects, causing infinite login loops.
+  `Lax` still prevents CSRF on POST/DELETE while allowing top-level GET navigations.
+- [x] **Auth rate limiter burst** — Increased from 1 to 3 to avoid legitimate users
+  getting locked out after a single failed attempt.
 
 ## Optimization Recommendations
 

@@ -19,13 +19,13 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host        string        `yaml:"host"`
-	Port        int           `yaml:"port"`
-	ExternalURL string        `yaml:"external_url"`
-	ReadTimeout time.Duration `yaml:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout"`
-	TrustedProxies []string  `yaml:"trusted_proxies"`
-	LANSubnets   []string    `yaml:"lan_subnets"`
+	Host           string        `yaml:"host"`
+	Port           int           `yaml:"port"`
+	ExternalURL    string        `yaml:"external_url"`
+	ReadTimeout    time.Duration `yaml:"read_timeout"`
+	WriteTimeout   time.Duration `yaml:"write_timeout"`
+	TrustedProxies []string      `yaml:"trusted_proxies"`
+	LANSubnets     []string      `yaml:"lan_subnets"`
 }
 
 type DatabaseConfig struct {
@@ -33,16 +33,16 @@ type DatabaseConfig struct {
 }
 
 type AuthConfig struct {
-	JWTSecret         string        `yaml:"jwt_secret"`
-	JWTExpiry         time.Duration `yaml:"jwt_expiry"`
-	SessionExpiry     time.Duration `yaml:"session_expiry"`
-	BCryptCost        int           `yaml:"bcrypt_cost"`
-	MFARequired       bool          `yaml:"mfa_required"`
-	RateLimitPerMin   int           `yaml:"rate_limit_per_min"`
-	APIRateLimitPerMin int          `yaml:"api_rate_limit_per_min"`
-	AllowRegistration bool          `yaml:"allow_registration"`
-	InviteOnly        bool          `yaml:"invite_only"`
-	SessionCookieName string        `yaml:"session_cookie_name"`
+	JWTSecret          string        `yaml:"jwt_secret"`
+	JWTExpiry          time.Duration `yaml:"jwt_expiry"`
+	SessionExpiry      time.Duration `yaml:"session_expiry"`
+	BCryptCost         int           `yaml:"bcrypt_cost"`
+	MFARequired        bool          `yaml:"mfa_required"`
+	RateLimitPerMin    int           `yaml:"rate_limit_per_min"`
+	APIRateLimitPerMin int           `yaml:"api_rate_limit_per_min"`
+	AllowRegistration  bool          `yaml:"allow_registration"`
+	InviteOnly         bool          `yaml:"invite_only"`
+	SessionCookieName  string        `yaml:"session_cookie_name"`
 }
 
 type DiscoveryConfig struct {
@@ -56,10 +56,10 @@ type DiscoveryConfig struct {
 }
 
 type MonitorConfig struct {
-	CheckInterval   time.Duration `yaml:"check_interval"`
-	Timeout         time.Duration `yaml:"timeout"`
-	RetryCount      int           `yaml:"retry_count"`
-	StatusPagePublic bool         `yaml:"status_page_public"`
+	CheckInterval    time.Duration `yaml:"check_interval"`
+	Timeout          time.Duration `yaml:"timeout"`
+	RetryCount       int           `yaml:"retry_count"`
+	StatusPagePublic bool          `yaml:"status_page_public"`
 }
 
 type CORSConfig struct {
@@ -75,19 +75,19 @@ type LoggingConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host:          "0.0.0.0",
-			Port:          8081,
-			ExternalURL:   "https://4rch3.io",
-			ReadTimeout:   10 * time.Second,
-			WriteTimeout:  30 * time.Second,
+			Host:           "0.0.0.0",
+			Port:           8081,
+			ExternalURL:    "https://4rch3.io",
+			ReadTimeout:    10 * time.Second,
+			WriteTimeout:   30 * time.Second,
 			TrustedProxies: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
-			LANSubnets:    []string{"192.168.0.0/16", "10.0.0.0/8"},
+			LANSubnets:     []string{"192.168.0.0/16", "10.0.0.0/8"},
 		},
 		Database: DatabaseConfig{
 			Path: "data/portal.db",
 		},
 		Auth: AuthConfig{
-			JWTSecret:          "change-me-in-production",
+			JWTSecret:          "MUST-BE-SET-VIA-PORTAL_JWT_SECRET-ENV-VAR",
 			JWTExpiry:          24 * time.Hour,
 			SessionExpiry:      30 * 24 * time.Hour,
 			BCryptCost:         12,
@@ -110,7 +110,7 @@ func DefaultConfig() *Config {
 			StatusPagePublic: false,
 		},
 		CORS: CORSConfig{
-			Enabled: true,
+			Enabled:        true,
 			AllowedOrigins: []string{"https://4rch3.io", "http://homelab.local"},
 		},
 		Logging: LoggingConfig{
@@ -142,8 +142,8 @@ func (c *Config) Validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)
 	}
-	if c.Auth.JWTSecret == "" || c.Auth.JWTSecret == "change-me-in-production" || c.Auth.JWTSecret == "CHANGE-ME-IN-PRODUCTION-USE-A-STRONG-RANDOM-SECRET" {
-		return fmt.Errorf("auth.jwt_secret must be set to a non-default value in production")
+	if c.Auth.JWTSecret == "" {
+		return fmt.Errorf("auth.jwt_secret must be set")
 	}
 	if c.Auth.JWTExpiry <= 0 {
 		return fmt.Errorf("auth.jwt_expiry must be positive, got %v", c.Auth.JWTExpiry)

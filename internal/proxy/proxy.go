@@ -27,7 +27,7 @@ func New(db *database.DB) *Proxy {
 	return &Proxy{
 		db:      db,
 		proxies: make(map[string]*httputil.ReverseProxy),
-		wsDial: (&net.Dialer{Timeout: 10 * time.Second}).Dial,
+		wsDial:  (&net.Dialer{Timeout: 10 * time.Second}).Dial,
 	}
 }
 
@@ -95,13 +95,14 @@ func (p *Proxy) setForwardingHeaders(r *http.Request, user *models.User) {
 		r.Header.Set("X-Forwarded-User", user.Username)
 		r.Header.Set("X-Forwarded-Role", string(user.Role))
 	}
-	r.Header.Add("X-Forwarded-For", r.RemoteAddr)
+	r.Header.Del("X-Forwarded-For")
+	r.Header.Set("X-Forwarded-For", r.RemoteAddr)
 }
 
 func (p *Proxy) handleWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
-	target.Scheme = "ws"
+	wsScheme := "ws"
 	if target.Scheme == "https" {
-		target.Scheme = "wss"
+		wsScheme = "wss"
 	}
 
 	backendConn, err := p.wsDial("tcp", target.Host)
@@ -110,6 +111,11 @@ func (p *Proxy) handleWebSocket(w http.ResponseWriter, r *http.Request, target *
 		return
 	}
 	defer backendConn.Close()
+
+	wsURL := *target
+	wsURL.Scheme = wsScheme
+	r.Host = target.Host
+	r.URL.Scheme = wsScheme
 
 	if err := r.Write(backendConn); err != nil {
 		writeJSONError(w, http.StatusBadGateway, "failed to send request to backend")
@@ -184,11 +190,11 @@ func (p *Proxy) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		target, user, err := p.resolveTarget(r)
 		if err != nil {
-		writeJSONError(w, err.code, err.message)
-		return
-	}
+			writeJSONError(w, err.code, err.message)
+			return
+		}
 
-	p.setForwardingHeaders(r, user)
+		p.setForwardingHeaders(r, user)
 
 		if isWebSocketRequest(r) {
 			p.handleWebSocket(w, r, target)

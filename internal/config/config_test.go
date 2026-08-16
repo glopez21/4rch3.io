@@ -90,9 +90,9 @@ func TestConfigValidateBadPort(t *testing.T) {
 
 func TestConfigValidateDefaultJWTSecret(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Auth.JWTSecret = "change-me-in-production"
+	cfg.Auth.JWTSecret = ""
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error for default JWT secret")
+		t.Fatal("expected error for empty JWT secret")
 	}
 }
 

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
 	"log/slog"
 	"net"
@@ -15,9 +16,9 @@ import (
 type contextKey string
 
 const (
-	UserKey      contextKey = "user"
-	ClaimsKey    contextKey = "claims"
-	IsLANKey     contextKey = "is_lan"
+	UserKey   contextKey = "user"
+	ClaimsKey contextKey = "claims"
+	IsLANKey  contextKey = "is_lan"
 )
 
 func GetUser(r *http.Request) *models.User {
@@ -65,21 +66,58 @@ func New(authService *auth.Service, lanCIDRs, trustedCIDRs []string, sessionCook
 }
 
 func (m *Middleware) realIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(host)
+	if remoteIP == nil {
+		return host
+	}
+
+	isTrusted := false
+	for _, trusted := range m.trustedProxies {
+		if trusted.Contains(remoteIP) {
+			isTrusted = true
+			break
+		}
+	}
+
+	if !isTrusted {
+		return host
+	}
+
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
-		ip := net.ParseIP(strings.TrimSpace(parts[0]))
-		if ip != nil {
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := net.ParseIP(strings.TrimSpace(parts[i]))
+			if ip == nil {
+				continue
+			}
+			isProxy := false
 			for _, trusted := range m.trustedProxies {
 				if trusted.Contains(ip) {
-					return strings.TrimSpace(parts[0])
+					isProxy = true
+					break
 				}
+			}
+			if !isProxy {
+				return ip.String()
+			}
+		}
+		for _, part := range parts {
+			if ip := net.ParseIP(strings.TrimSpace(part)); ip != nil {
+				return ip.String()
 			}
 		}
 	}
+
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+		if ip := net.ParseIP(xri); ip != nil {
+			return ip.String()
+		}
 	}
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+
 	return host
 }
 
@@ -168,6 +206,7 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 		}
 
 		if token == "" {
+			slog.Debug("authenticate: no token found", "path", r.URL.Path)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -176,10 +215,12 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 			apiKey := strings.TrimPrefix(token, "apikey:")
 			user, err := m.authService.ValidateAPIKey(apiKey)
 			if err == nil && user != nil {
+				slog.Debug("authenticate: api key valid", "username", user.Username)
 				ctx := context.WithValue(r.Context(), UserKey, user)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
+			slog.Debug("authenticate: api key invalid", "error", err)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -187,19 +228,29 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 		if fromCookie {
 			session, err := m.authService.GetSession(token)
 			if err != nil || session == nil {
+				slog.Debug("authenticate: session not found", "error", err)
 				next.ServeHTTP(w, r)
 				return
 			}
 			if time.Now().After(session.ExpiresAt) {
+				slog.Debug("authenticate: session expired", "expires_at", session.ExpiresAt)
 				m.authService.DeleteSession(token)
 				next.ServeHTTP(w, r)
 				return
 			}
 			user, err := m.authService.GetUserByID(session.UserID)
 			if err != nil || user == nil {
+				slog.Debug("authenticate: user not found", "user_id", session.UserID, "error", err)
 				next.ServeHTTP(w, r)
 				return
 			}
+			if !user.Active {
+				slog.Debug("authenticate: user inactive", "username", user.Username)
+				m.authService.DeleteSession(token)
+				next.ServeHTTP(w, r)
+				return
+			}
+			slog.Debug("authenticate: session valid", "username", user.Username)
 			ctx := context.WithValue(r.Context(), UserKey, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
@@ -207,15 +258,25 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 
 		claims, err := m.authService.ValidateJWT(token)
 		if err != nil {
+			slog.Debug("authenticate: jwt invalid", "error", err)
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		user, err := m.authService.GetUserByID(claims.UserID)
 		if err != nil {
+			slog.Debug("authenticate: jwt user not found", "user_id", claims.UserID, "error", err)
 			next.ServeHTTP(w, r)
 			return
 		}
+
+		if !user.Active {
+			slog.Debug("authenticate: jwt user inactive", "username", user.Username)
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		slog.Debug("authenticate: jwt valid", "username", user.Username)
 
 		ctx := context.WithValue(r.Context(), UserKey, user)
 		ctx = context.WithValue(ctx, ClaimsKey, claims)
@@ -245,6 +306,19 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func SecurityHeaders(next http.Handler) http.Handler {

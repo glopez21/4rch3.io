@@ -8,18 +8,18 @@ import (
 )
 
 type DashboardData struct {
-	Authenticated  bool
-	IsLAN          bool
-	Services       []ServiceCardData
-	Deploys        []DeployRecordData
-	GrafanaDomain  string
+	Authenticated bool
+	IsLAN         bool
+	Services      []ServiceCardData
+	Deploys       []DeployRecordData
+	GrafanaDomain string
 }
 
 type DeployRecordData struct {
-	Service   string
-	Status    string
-	SHA       string
-	Timestamp string
+	Service     string
+	Status      string
+	SHA         string
+	Timestamp   string
 	StatusBadge string
 }
 
@@ -41,6 +41,7 @@ type AdminData struct {
 	Users         []UserData
 	Services      []ServiceData
 	Logs          []AuditLogData
+	CSRFToken     string
 }
 
 type UserData struct {
@@ -208,6 +209,7 @@ var loginTmpl = template.Must(template.New("login").Parse(`<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - 4rch3.io</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-7uoN2oWEkBN1YI9ZOKj1jF3OGfC2jqF6elWMrbFU+dxl3NTah3MsiGZ+36I96u7Y" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     ` + tailwindConfig + `
@@ -234,7 +236,8 @@ var loginTmpl = template.Must(template.New("login").Parse(`<!DOCTYPE html>
         </div>
 
         <div class="bg-gray-900/80 backdrop-blur-xl rounded-2xl p-8 border border-gray-800 glow-border">
-            <form hx-post="/login" hx-target="this" hx-swap="outerHTML" class="space-y-6">
+            <!-- Add native form fallback so login works even if htmx fails to load -->
+            <form action="/login" method="post" hx-post="/login" hx-target="this" hx-swap="outerHTML" class="space-y-6">
                 <div id="login-error" class="text-red-400 text-sm text-center"></div>
 
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -273,6 +276,7 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>4rch3.io</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-7uoN2oWEkBN1YI9ZOKj1jF3OGfC2jqF6elWMrbFU+dxl3NTah3MsiGZ+36I96u7Y" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     ` + tailwindConfig + `
@@ -468,6 +472,8 @@ var adminTmpl = template.Must(template.New("admin").Parse(`<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - 4rch3.io</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <meta name="csrf-token" content="{{.CSRFToken}}">
     <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-7uoN2oWEkBN1YI9ZOKj1jF3OGfC2jqF6elWMrbFU+dxl3NTah3MsiGZ+36I96u7Y" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     ` + tailwindConfig + `

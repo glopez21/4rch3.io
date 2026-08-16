@@ -24,14 +24,16 @@ services:
           memory: 128M
           cpus: "0.5"
     networks:
-      - devnet
+      - proxy-net
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.portal.rule=Host(`4rch3.io`) || Host(`portal.4rch3.io`)"
       - "traefik.http.routers.portal.entrypoints=websecure"
       - "traefik.http.routers.portal.tls=true"
+      - "traefik.http.routers.portal.tls.certresolver=cloudflare"
       - "traefik.http.services.portal.loadbalancer.server.port=8081"
-      - "traefik.docker.network=devnet"
+      - "traefik.docker.network=proxy-net"
+      - "traefik.http.routers.portal.middlewares=security-headers@file,rate-limit@file,cf-access-auth@file"
       - "4rch3.io.enable=true"
       - "4rch3.io.service=portal"
       - "4rch3.io.name=4rch3 Portal"
@@ -41,6 +43,6 @@ volumes:
   portal_data:
 
 networks:
-  devnet:
+  proxy-net:
     external: true
-    name: devnet
+    name: proxy-net
