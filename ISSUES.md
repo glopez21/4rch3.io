@@ -525,6 +525,61 @@
   + `server.scheme=https`.
 - **Reference:** homelab repo `configs/traefik/dynamic/transports.yml`
 
+### 54. Portal Sync Overwrote Newer clu5t3r Code (deploy feature lost)
+- **Status:** Open / Deferred — recovery pending
+- **Severity:** Critical
+- **Date:** 2026-08-16
+- **Description:** The clu5t3r working copy of `4rch3.io` was **ahead** of the
+  local git repo: it contained a `deploy` feature that was never synced back
+  to git. Local-only files on clu5t3r: `internal/deploy/deploy.go` and
+  `internal/handlers/stats.go`. Deploy support existed in `config.go`
+  (`DeployTarget`/`DeployConfig`), `dashboard.go` (`dockerSocket` field on
+  `DashboardHandler`), `webhook.go`/`main.go` (deploy runner wiring),
+  `config.yaml` (`deploy:` block), `.env` (`PORTAL_DEPLOY_SECRET`), and
+  `docker-compose.yml` (extra augur/threat-pulse/threatwirenews bind mounts).
+- **Incident:** While adding the SVG favicon, an `rsync -az` from local →
+  clu5t3r overwrote clu5t3r's newer `config.go`, `dashboard.go`, `main.go`,
+  `webhook.go`, `config.yaml`, `.env`, `docker-compose.yml`, `NOTES.md`,
+  `PLAN.md` with older local versions. The extra files survived, so the
+  container build now fails:
+  `internal/deploy/deploy.go:16: undefined: config.DeployTarget` and
+  `internal/handlers/stats.go:57: h.dockerSocket undefined`.
+- **What was recovered intact:**
+  - `internal/deploy/deploy.go` and `internal/handlers/stats.go` (still on
+    clu5t3r, unclobbered).
+  - `config.yaml` deploy block recovered from the running container image
+    (`docker exec 4rch3-portal cat /app/config.yaml`): targets = augur,
+    threat-pulse, threatwirenews with their compose files; timeout 5m;
+    `secret: "${PORTAL_DEPLOY_SECRET}"`.
+  - `PORTAL_DEPLOY_SECRET=bd9041d0b3ca6a5bf07faea88c0ec4bf71e99a5dd7d4868a`
+    and `PORTAL_JWT_SECRET` from running container env (`docker inspect`).
+- **What is NOT recoverable:** the original newer `config.go`/`dashboard.go`/
+  `webhook.go`/`main.go`/`docker-compose.yml` source — the BuildKit build
+  cache was pruned (content store only 752K, no source blobs), and the image
+  final stage contains only the compiled binary + `config.yaml` + `schema.sql`.
+- **Current state:** `4rch3-portal` still running and healthy on the
+  pre-incident image (`4rch3io-portal:latest`, built 2026-08-15 16:12Z), so
+  the site is up. The favicon changes are committed locally (`0b13819`) and
+  synced, but the container could NOT be rebuilt (build fails on the missing
+  deploy symbols above). Do not rebuild until recovery steps are done.
+- **Recovery plan (deferred):**
+  1. Rebuild `DeployTarget`/`DeployConfig` structs in `internal/config/config.go`
+     to match `deploy.go` usage + recovered YAML block.
+  2. Add `dockerSocket` field + `NewDashboardHandler` wiring in
+     `internal/handlers/dashboard.go`; keep `stats.go` `ServiceStats` handler.
+  3. Wire `deploy.Runner` into the deploy webhook in `webhook.go`/`main.go`
+     (confirm handler/route names from the compiled binary's exported symbols
+     first, since the original is gone).
+  4. Restore `docker-compose.yml` (add `PORTAL_DEPLOY_SECRET` + 3 bind mounts)
+     and `.env` (`PORTAL_DEPLOY_SECRET`).
+  5. Rebuild the image and verify the deploy webhook works end-to-end.
+- **Lessons learned:** Always check for clu5t3r-only files / diff before
+  `rsync`-ing local → clu5t3r; treat clu5t3r as a possible newer source;
+  keep the local git repo as the single source of truth and commit deploy
+  feature back to git once reconstructed.
+- **Reference:** `/home/x5pyd3rx/4rch3.io/` (clu5t3r), image
+  `4rch3io-portal:latest`, local repo `/home/w01f/projects/4rch3.io`.
+
 ## Resolved Issues
 
 ### R-1. Docker SDK Dependency Conflict
