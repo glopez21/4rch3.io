@@ -622,7 +622,7 @@ var servicePanelTmpl = template.Must(template.New("servicePanel").Parse(`<div cl
             <p class="text-gray-500 text-sm">{{.Description}}</p>
         </div>
         <div class="flex items-center gap-2">
-            {{if .URL}}<a href="{{.URL}}" target="_blank" class="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-gray-300 hover:text-white hover:border-gray-600 text-sm">Open</a>{{end}}
+            {{if .PublicURL}}<a href="{{.PublicURL}}" target="_blank" class="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-gray-300 hover:text-white hover:border-gray-600 text-sm">Open</a>{{end}}
             <a href="/services/{{.ID}}" class="px-3 py-2 bg-neon-purple/20 border border-neon-purple/30 rounded-lg text-neon-purple hover:bg-neon-purple/30 text-sm">Manage Service</a>
         </div>
     </div>
