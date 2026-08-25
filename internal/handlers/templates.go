@@ -24,6 +24,7 @@ type DeployRecordData struct {
 }
 
 type ServiceCardData struct {
+	ID          int64
 	Icon        string
 	DisplayName string
 	Name        string
@@ -72,6 +73,7 @@ func toServiceCards(services []*models.Service) []ServiceCardData {
 	cards := make([]ServiceCardData, 0, len(services))
 	for _, svc := range services {
 		card := ServiceCardData{
+			ID:          svc.ID,
 			Icon:        svc.Icon,
 			DisplayName: svc.DisplayName,
 			Name:        svc.Name,
@@ -276,11 +278,35 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>4rch3.io</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-7uoN2oWEkBN1YI9ZOKj1jF3OGfC2jqF6elWMrbFU+dxl3NTah3MsiGZ+36I96u7Y" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    ` + tailwindConfig + `
-    ` + baseStyle + `
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        neon: {
+                            cyan: '#00f0ff',
+                            purple: '#a855f7',
+                            pink: '#ec4899',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body { background: #0a0a0f; font-family: ui-monospace, monospace; }
+        .grid-bg {
+            background-image:
+                linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+    </style>
     <style>
         .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
         .status-dot.online { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.6); }
@@ -292,9 +318,14 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
         .card-hover { transition: all 0.2s ease; }
         .card-hover:hover { transform: translateY(-2px); border-color: rgba(0,240,255,0.3); }
     </style>
-</head>
-<body class="grid-bg min-h-screen">
-    ` + navBar + `
+ </head>
+ <body class="grid-bg min-h-screen">
+    
+    <nav class="border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center gap-3">
+                    <span class="text-2xl font-bold bg-gradient-to-r from-neon-cyan via-neon-purple to-neon-pink bg-clip-text text-transparent">4rch3</span>
                     <span class="text-gray-600 text-sm">/</span>
                     <span class="text-gray-400 text-sm">portal</span>
                 </div>
@@ -348,7 +379,12 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
             </div>
         {{else}}
             {{range .Services}}
-            <div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5">
+            <div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5 cursor-pointer"
+                 hx-get="/api/service-panel?id={{.ID}}"
+                 hx-trigger="click"
+                 hx-target="#service-modal-content"
+                 hx-swap="innerHTML"
+                 onclick="document.getElementById('service-modal').classList.remove('hidden')">
                 <div class="flex items-start justify-between mb-3">
                     <div class="flex items-center gap-3">
                         <span class="text-xl">{{.Icon}}</span>
@@ -372,7 +408,7 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
         <div class="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="bg-gray-900/50 border border-gray-800 rounded-2xl p-6">
                 <h3 class="text-lg font-semibold text-white mb-4">Recent Deployments</h3>
-                <div id="deploy-panel" hx-get="/api/deploy-panel" hx-trigger="load" hx-swap="innerHTML">
+                <div id="deploy-panel" hx-get="/api/deploy-panel" hx-swap="innerHTML">
                     <div class="space-y-2">
                     {{range .Deploys}}
                         <div class="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
@@ -429,11 +465,23 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
         </div>
     </main>
 
+    <!-- Modal Container -->
+    <div id="service-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50">
+        <div class="max-w-5xl w-full mx-4">
+            <div id="service-modal-content" class="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl text-gray-400 text-sm">loading...</div>
+            <div class="text-center mt-3">
+                <button onclick="document.getElementById('service-modal').classList.add('hidden'); const es=window.__svcStats; if(es){es.close(); window.__svcStats=null;}" class="mt-2 px-4 py-2 bg-gray-800/70 border border-gray-700 rounded-xl text-gray-300 hover:text-white hover:border-gray-600 transition-all text-sm">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
-        htmx.onLoad(function() {
+        function refreshPanels() {
             htmx.ajax('GET', '/api/services/status', { target: '#services-grid', swap: 'innerHTML' });
             htmx.ajax('GET', '/api/deploy-panel', { target: '#deploy-panel', swap: 'innerHTML' });
-        });
+        }
+        document.addEventListener('DOMContentLoaded', refreshPanels);
+        setInterval(refreshPanels, 30000);
     </script>
 </body>
 </html>`))
@@ -448,7 +496,12 @@ var deployPanelTmpl = template.Must(template.New("deployPanel").Parse(
 	</div>{{end}}`))
 
 var serviceCardTmpl = template.Must(template.New("serviceCard").Parse(
-	`{{range .}}<div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5">
+	`{{range .}}<div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5 cursor-pointer"
+        hx-get="/api/service-panel?id={{.ID}}"
+        hx-trigger="click"
+        hx-target="#service-modal-content"
+        hx-swap="innerHTML"
+        onclick="document.getElementById('service-modal').classList.remove('hidden')">
         <div class="flex items-start justify-between mb-3">
             <div class="flex items-center gap-3">
                 <span class="text-xl">{{.Icon}}</span>
@@ -562,3 +615,142 @@ var adminTmpl = template.Must(template.New("admin").Parse(`<!DOCTYPE html>
     </main>
 </body>
 </html>`))
+
+var servicePanelTmpl = template.Must(template.New("servicePanel").Parse(`<div class="flex items-start justify-between mb-4">
+        <div>
+            <h3 class="text-lg font-semibold text-white">{{.DisplayName}}</h3>
+            <p class="text-gray-500 text-sm">{{.Description}}</p>
+        </div>
+        <div class="flex items-center gap-2">
+            {{if .URL}}<a href="{{.URL}}" target="_blank" class="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-gray-300 hover:text-white hover:border-gray-600 text-sm">Open</a>{{end}}
+            <a href="/services/{{.ID}}" class="px-3 py-2 bg-neon-purple/20 border border-neon-purple/30 rounded-lg text-neon-purple hover:bg-neon-purple/30 text-sm">Manage Service</a>
+        </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-gray-950/50 border border-gray-800 rounded-xl p-3"><h4 class="text-gray-300 text-sm mb-2">CPU %</h4><div id="cpuChart"></div></div>
+        <div class="bg-gray-950/50 border border-gray-800 rounded-xl p-3"><h4 class="text-gray-300 text-sm mb-2">Memory</h4><div id="memChart"></div></div>
+        <div class="bg-gray-950/50 border border-gray-800 rounded-xl p-3"><h4 class="text-gray-300 text-sm mb-2">Network (KB/s)</h4><div id="netChart"></div></div>
+    </div>
+    <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css"/>
+    <script src="https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+    <script>
+    (function(){
+      function initCharts(){
+        if(typeof uPlot==='undefined'){setTimeout(initCharts,100);return;}
+        var id = {{.ID}};
+        var maxPoints = 300;
+        function mkData(){
+          var xs = [];
+          var ys1 = []; var ys2 = []; var ys3a = []; var ys3b = [];
+          return {xs: xs, cpu: ys1, mem: ys2, rx: ys3a, tx: ys3b};
+        }
+        var d = mkData();
+        function push(pt){
+          d.xs.push(pt.ts);
+          d.cpu.push(pt.cpu);
+          d.mem.push(pt.mem_used);
+          d.rx.push(pt.rx_kbps);
+          d.tx.push(pt.tx_kbps);
+          if(d.xs.length>maxPoints){ d.xs.shift(); d.cpu.shift(); d.mem.shift(); d.rx.shift(); d.tx.shift(); }
+        }
+        var optsBase = {width: 320, height: 140, legend: {show:false}, axes:[{stroke:'#666'},{stroke:'#666'}], cursor: {drag: {x:true, y:false}} };
+        var cpuPlot = new uPlot(Object.assign({}, optsBase, {title: '', series:[{}, {stroke:'#22c55e'}]}), [[],[]], document.getElementById('cpuChart'));
+        var memPlot = new uPlot(Object.assign({}, optsBase, {series:[{}, {stroke:'#60a5fa'}]}), [[],[]], document.getElementById('memChart'));
+        var netPlot = new uPlot(Object.assign({}, optsBase, {series:[{}, {label:'rx', stroke:'#a78bfa'}, {label:'tx', stroke:'#f472b6'}]}), [[],[],[]], document.getElementById('netChart'));
+        var es = new EventSource('/api/service-stats?id='+id);
+        window.__svcStats = es;
+        es.onmessage = function(ev){
+          try {
+            var pt = JSON.parse(ev.data);
+            pt.rx_kbps = (pt.rx/1024).toFixed(1)*1; pt.tx_kbps = (pt.tx/1024).toFixed(1)*1;
+            push(pt);
+            cpuPlot.setData([d.xs, d.cpu]);
+            memPlot.setData([d.xs, d.mem]);
+            netPlot.setData([d.xs, d.rx, d.tx]);
+          } catch(e){}
+        };
+        es.onerror = function(){};
+      }
+      initCharts();
+    })();
+    </script>`))
+
+var serviceManageTmpl = template.Must(template.New("serviceManage").Parse(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.DisplayName}} - Manage</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        neon: {
+                            cyan: '#00f0ff',
+                            purple: '#a855f7',
+                            pink: '#ec4899',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body { background: #0a0a0f; font-family: ui-monospace, monospace; }
+        .grid-bg {
+            background-image:
+                linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+    </style>
+</head>
+<body class="grid-bg min-h-screen">
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="mb-4">
+            <a href="/" class="inline-flex items-center gap-2 text-gray-400 hover:text-white text-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/><line x1="20" y1="12" x2="9" y2="12"/></svg>
+                Back to Portal
+            </a>
+        </div>
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h2 class="text-2xl font-bold text-white">{{.DisplayName}}</h2>
+                <p class="text-gray-500 text-sm">{{.Description}}</p>
+            </div>
+            <div class="flex gap-2">
+                {{if .URL}}<a href="{{.URL}}" target="_blank" class="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-gray-300 hover:text-white hover:border-gray-600 text-sm">Open</a>{{end}}
+                <a href="/svc/{{.Name}}" class="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-gray-300 hover:text-white hover:border-gray-600 text-sm">Proxy</a>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-gray-900/50 border border-gray-800 rounded-2xl p-6">
+                <h3 class="text-lg font-semibold text-white mb-3">Info</h3>
+                <div class="text-gray-400 text-sm space-y-1">
+                    <div><span class="text-gray-500">Internal:</span> {{.InternalURL}}</div>
+                    <div><span class="text-gray-500">Health:</span> {{.HealthPath}}</div>
+                    <div><span class="text-gray-500">Status:</span> {{.Status}}</div>
+                </div>
+            </div>
+            <div class="bg-gray-900/50 border border-gray-800 rounded-2xl p-6">
+                <h3 class="text-lg font-semibold text-white mb-3">Actions</h3>
+                {{if .DeployAllowed}}
+                <button id="deployBtn" class="px-4 py-2 bg-neon-cyan/20 border border-neon-cyan/30 rounded-xl text-neon-cyan hover:bg-neon-cyan/30 text-sm">Deploy</button>
+                <script>
+                    document.getElementById('deployBtn').addEventListener('click', function(){
+                        fetch('/api/webhook/deploy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({service: '{{.Name}}'})})
+                          .then(r=>r.json()).then(()=>alert('Deploy triggered'));
+                    });
+                </script>
+                {{else}}
+                <p class="text-gray-500 text-sm">Deploy not enabled for this service.</p>
+                {{end}}
+            </div>
+        </div>
+    </main>
+</body></html>`))

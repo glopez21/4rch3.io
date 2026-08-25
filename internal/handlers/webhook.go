@@ -1,16 +1,21 @@
 package handlers
 
 import (
+	"crypto/hmac"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/4rch3/portal/internal/database"
+	"github.com/4rch3/portal/internal/deploy"
+	"github.com/4rch3/portal/internal/middleware"
 	"github.com/4rch3/portal/internal/models"
 )
 
 type WebhookHandler struct {
-	db *database.DB
+	db     *database.DB
+	runner *deploy.Runner
+	secret string
 }
 
 type DeployEvent struct {
@@ -19,10 +24,15 @@ type DeployEvent struct {
 	SHA     string `json:"sha"`
 }
 
-func NewWebhookHandler(db *database.DB) *WebhookHandler {
-	return &WebhookHandler{db: db}
+func NewWebhookHandler(db *database.DB, runner *deploy.Runner, secret string) *WebhookHandler {
+	return &WebhookHandler{db: db, runner: runner, secret: secret}
 }
 
+// Deploy accepts deploy notifications and, when the target service is in
+// the configured whitelist, triggers a redeploy (docker compose pull+up).
+//
+// Authorization: a valid browser session OR a matching X-Webhook-Secret
+// header (used by CI pipelines when PORTAL_DEPLOY_SECRET is configured).
 func (h *WebhookHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorJSON(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -35,28 +45,56 @@ func (h *WebhookHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ev.Service == "" || ev.Status == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "service and status required")
+	if ev.Service == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "service required")
 		return
+	}
+
+	authorized := middleware.GetUser(r) != nil
+	if !authorized && h.secret != "" {
+		provided := r.Header.Get("X-Webhook-Secret")
+		authorized = provided != "" && hmac.Equal([]byte(provided), []byte(h.secret))
+	}
+	if !authorized {
+		writeErrorJSON(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	status := ev.Status
+	detail := "status=" + status + " sha=" + ev.SHA
+
+	if h.runner != nil && h.runner.Allowed(ev.Service) {
+		ctx := r.Context()
+		out, err := h.runner.Deploy(ctx, ev.Service)
+		if err != nil {
+			slog.Error("deploy failed", "service", ev.Service, "error", err)
+			status = "failure"
+			detail = "status=failure error=" + err.Error()
+		} else {
+			status = "success"
+			detail = "status=success"
+			slog.Info("deploy completed", "service", ev.Service, "output", out)
+		}
+	} else if status == "" {
+		// Not whitelisted and no explicit status: record a plain event.
+		status = "notified"
 	}
 
 	a := &models.AuditLog{
 		UserID:    0,
 		Action:    "deploy",
 		Resource:  ev.Service,
-		Detail:    "status=" + ev.Status + " sha=" + ev.SHA,
+		Detail:    detail,
 		IP:        r.RemoteAddr,
 		UserAgent: r.UserAgent(),
 	}
-
 	if err := h.db.LogAudit(a); err != nil {
 		slog.Warn("failed to log deploy event", "error", err)
 	}
 
-	slog.Info("deploy event", "service", ev.Service, "status", ev.Status, "sha", ev.SHA)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+	json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
 type DeployRecord struct {

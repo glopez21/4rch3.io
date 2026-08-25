@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -183,16 +184,33 @@ func (d *DockerDiscovery) containerToService(c dockerContainer) *models.Service 
 		svc.HealthPath = "/health"
 	}
 
-	if len(c.Ports) > 0 {
-		port := c.Ports[0]
-		svc.URL = fmt.Sprintf("http://%s:%d", name, port.PrivatePort)
+	// Determine the actual Docker container name for DNS resolution
+	containerName := ""
+	for _, n := range c.Names {
+		containerName = strings.TrimPrefix(n, "/")
+		break
+	}
+
+	// Determine the port: prefer 4rch3.io.port label, fall back to first published port
+	var privatePort uint16
+	if p := labels[d.labelPrefix+".port"]; p != "" {
+		if val, err := strconv.Atoi(p); err == nil && val > 0 {
+			privatePort = uint16(val)
+		}
+	}
+	if privatePort == 0 && len(c.Ports) > 0 {
+		privatePort = c.Ports[0].PrivatePort
+	}
+
+	if containerName != "" && privatePort > 0 {
+		svc.URL = fmt.Sprintf("http://%s:%d", containerName, privatePort)
 	}
 
 	if c.NetworkSettings != nil {
 		if netCfg, ok := c.NetworkSettings.Networks[d.network]; ok && netCfg.IPAddress != "" {
 			svc.InternalURL = fmt.Sprintf("http://%s", netCfg.IPAddress)
-			if len(c.Ports) > 0 {
-				svc.InternalURL = fmt.Sprintf("http://%s:%d", netCfg.IPAddress, c.Ports[0].PrivatePort)
+			if privatePort > 0 {
+				svc.InternalURL = fmt.Sprintf("http://%s:%d", netCfg.IPAddress, privatePort)
 			}
 		}
 	}

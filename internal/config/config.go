@@ -16,6 +16,26 @@ type Config struct {
 	Monitor   MonitorConfig   `yaml:"monitor"`
 	CORS      CORSConfig      `yaml:"cors"`
 	Logging   LoggingConfig   `yaml:"logging"`
+	Deploy    DeployConfig    `yaml:"deploy"`
+}
+
+// DeployTarget describes one whitelisted compose project the deploy
+// webhook is allowed to redeploy.
+type DeployTarget struct {
+	Service string   `yaml:"service"`
+	Dir     string   `yaml:"dir"`
+	Files   []string `yaml:"files"`
+}
+
+// DeployConfig configures the deploy runner: a whitelist of services that
+// may be redeployed via POST /api/webhook/deploy. When Secret is set,
+// callers must present it in the X-Webhook-Secret header (an authenticated
+// browser session is also accepted).
+type DeployConfig struct {
+	Enabled bool           `yaml:"enabled"`
+	Secret  string         `yaml:"secret"`
+	Timeout time.Duration  `yaml:"timeout"`
+	Targets []DeployTarget `yaml:"targets"`
 }
 
 type ServerConfig struct {

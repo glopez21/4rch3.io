@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/4rch3/portal/internal/auth"
 	"github.com/4rch3/portal/internal/config"
 	"github.com/4rch3/portal/internal/database"
+	"github.com/4rch3/portal/internal/deploy"
 	"github.com/4rch3/portal/internal/discovery"
 	"github.com/4rch3/portal/internal/handlers"
 	"github.com/4rch3/portal/internal/metrics"
@@ -22,7 +24,6 @@ import (
 	"github.com/4rch3/portal/internal/models"
 	"github.com/4rch3/portal/internal/monitor"
 	"github.com/4rch3/portal/internal/proxy"
-	"github.com/4rch3/portal/web/static"
 	"golang.org/x/time/rate"
 )
 
@@ -89,7 +90,12 @@ func main() {
 
 	authHandler := handlers.NewAuthHandler(db, svc, cfg.Auth.SessionCookieName, cfg.Auth.SessionExpiry)
 	grafanaDomain := domainFromURL(cfg.Server.ExternalURL)
-	dashHandler := handlers.NewDashboardHandler(db, grafanaDomain)
+	// docker socket path for stats streaming
+	dockerSocket := cfg.Discovery.DockerSocket
+	if strings.HasPrefix(dockerSocket, "unix://") {
+		dockerSocket = strings.TrimPrefix(dockerSocket, "unix://")
+	}
+	dashHandler := handlers.NewDashboardHandler(db, grafanaDomain, dockerSocket)
 	adminHandler := handlers.NewAdminHandler(db, svc)
 
 	authLimiter := middleware.NewRateLimiter(rate.Limit(cfg.Auth.RateLimitPerMin)/60, 3)
@@ -161,6 +167,16 @@ func main() {
 	mon := monitor.New(db, cfg.Monitor.CheckInterval, cfg.Monitor.Timeout, cfg.Monitor.RetryCount)
 	go mon.Start(ctx)
 
+	deployRunner := deploy.New(cfg.Deploy)
+	dashHandler.SetDeployRunner(deployRunner)
+	if cfg.Deploy.Enabled && deployRunner.HasTargets() {
+		if err := deployRunner.ValidateConfig(); err != nil {
+			slog.Warn("deploy runner misconfigured", "error", err)
+		} else {
+			slog.Info("deploy runner enabled", "targets", deployRunner.Targets())
+		}
+	}
+
 	mux := http.NewServeMux()
 
 	mux.Handle("/login", authLimiter.Middleware(http.HandlerFunc(authHandler.Login)))
@@ -168,7 +184,10 @@ func main() {
 	mux.HandleFunc("/api/auth/me", authHandler.Me)
 
 	mux.Handle("/api/services/status", apiLimiter.Middleware(mw.RequireAuth(http.HandlerFunc(dashHandler.ServiceStatus))))
+	mux.Handle("/api/service-panel", apiLimiter.Middleware(mw.RequireAuth(http.HandlerFunc(dashHandler.ServicePanel))))
+	mux.Handle("/api/service-stats", apiLimiter.Middleware(mw.RequireAuth(http.HandlerFunc(dashHandler.ServiceStats))))
 	mux.Handle("/admin", mw.RequireAuth(mw.RequireRole("admin")(http.HandlerFunc(adminHandler.Dashboard))))
+	mux.Handle("/services/", mw.RequireAuth(http.HandlerFunc(dashHandler.ServiceManage)))
 	mux.Handle("/admin/users", mw.RequireAuth(mw.RequireRole("admin")(http.HandlerFunc(adminHandler.Users))))
 	mux.HandleFunc("/api/auth/csrf", authHandler.CSRFToken)
 
@@ -181,21 +200,10 @@ func main() {
 		w.Write([]byte(`{"status":"ok","service":"4rch3-portal"}`))
 	})
 
-	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(static.FaviconSVG)
-	})
-	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(static.FaviconSVG)
-	})
-
 	mux.Handle("/metrics", metrics.Handler())
 
-	webhookHandler := handlers.NewWebhookHandler(db)
-	mux.Handle("/api/webhook/deploy", apiLimiter.Middleware(mw.RequireAuth(http.HandlerFunc(webhookHandler.Deploy))))
+	webhookHandler := handlers.NewWebhookHandler(db, deployRunner, cfg.Deploy.Secret)
+	mux.Handle("/api/webhook/deploy", apiLimiter.Middleware(mw.Authenticate(http.HandlerFunc(webhookHandler.Deploy))))
 	mux.Handle("/api/deploys", apiLimiter.Middleware(mw.RequireAuth(http.HandlerFunc(webhookHandler.RecentDeploys))))
 
 	mux.Handle("/api/deploy-panel", mw.RequireAuth(http.HandlerFunc(dashHandler.DeployPanel)))
@@ -290,6 +298,9 @@ func overrideFromEnv(cfg *config.Config) {
 	}
 	if v := os.Getenv("PORTAL_PORT"); v != "" {
 		fmt.Sscanf(v, "%d", &cfg.Server.Port)
+	}
+	if v := os.Getenv("PORTAL_DEPLOY_SECRET"); v != "" {
+		cfg.Deploy.Secret = v
 	}
 }
 

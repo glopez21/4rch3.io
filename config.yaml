@@ -29,7 +29,7 @@ auth:
 discovery:
   docker_socket: "unix:///var/run/docker.sock"
   scan_interval: 30s
-  default_network: "devnet"
+  default_network: "proxy-net"
   label_prefix: "4rch3.io"
 
 monitor:
