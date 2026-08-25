@@ -45,6 +45,10 @@ func (db *DB) Migrate() error {
 		return fmt.Errorf("execute schema: %w", err)
 	}
 
+	// migrations for new columns
+	db.Exec(`ALTER TABLE services ADD COLUMN public_url TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE services ADD COLUMN scheme TEXT DEFAULT 'http'`)
+
 	return nil
 }
 
@@ -248,16 +252,17 @@ func (db *DB) DeleteExpiredSessions() (int64, error) {
 
 func (db *DB) CreateService(svc *models.Service) (int64, error) {
 	res, err := db.Exec(
-	 `INSERT INTO services (name, display_name, description, url, internal_url, icon,
+	 `INSERT INTO services (name, display_name, description, url, public_url, internal_url, scheme, icon,
 		 category, group_name, health_path, type, docker_id, docker_name, enabled, public)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(name) DO UPDATE SET
 		 display_name=excluded.display_name, description=excluded.description, url=excluded.url,
-		 internal_url=excluded.internal_url, icon=excluded.icon, category=excluded.category,
+		 public_url=excluded.public_url, internal_url=excluded.internal_url, scheme=excluded.scheme,
+		 icon=excluded.icon, category=excluded.category,
 		 group_name=excluded.group_name, health_path=excluded.health_path,
 		 docker_id=excluded.docker_id, docker_name=excluded.docker_name,
 		 updated_at=datetime('now')`,
-		svc.Name, svc.DisplayName, svc.Description, svc.URL, svc.InternalURL, svc.Icon,
+		svc.Name, svc.DisplayName, svc.Description, svc.URL, svc.PublicURL, svc.InternalURL, svc.Scheme, svc.Icon,
 		svc.Category, svc.Group, svc.HealthPath, svc.Type, svc.DockerID, svc.DockerName,
 		svc.Enabled, svc.Public,
 	)
@@ -269,7 +274,7 @@ func (db *DB) CreateService(svc *models.Service) (int64, error) {
 
 func (db *DB) ListServices() ([]*models.Service, error) {
 	rows, err := db.Query(
-		`SELECT id, name, display_name, description, url, internal_url, icon,
+		`SELECT id, name, display_name, description, url, public_url, internal_url, scheme, icon,
 		 category, group_name, health_path, type, docker_id, docker_name,
 		 enabled, public, status, latency, last_checked, created_at, updated_at
 		 FROM services ORDER BY category, display_name`)
@@ -283,7 +288,7 @@ func (db *DB) ListServices() ([]*models.Service, error) {
 		s := &models.Service{}
 		var lastChecked, createdAt, updatedAt sql.NullString
 		if err := rows.Scan(&s.ID, &s.Name, &s.DisplayName, &s.Description,
-			&s.URL, &s.InternalURL, &s.Icon, &s.Category, &s.Group,
+			&s.URL, &s.PublicURL, &s.InternalURL, &s.Scheme, &s.Icon, &s.Category, &s.Group,
 			&s.HealthPath, &s.Type, &s.DockerID, &s.DockerName,
 			&s.Enabled, &s.Public, &s.Status, &s.Latency,
 			&lastChecked, &createdAt, &updatedAt); err != nil {
@@ -307,12 +312,12 @@ func (db *DB) GetService(id int64) (*models.Service, error) {
 	s := &models.Service{}
 	var lastChecked, createdAt, updatedAt sql.NullString
 	err := db.QueryRow(
-		`SELECT id, name, display_name, description, url, internal_url, icon,
+		`SELECT id, name, display_name, description, url, public_url, internal_url, scheme, icon,
 		 category, group_name, health_path, type, docker_id, docker_name,
 		 enabled, public, status, latency, last_checked, created_at, updated_at
 		 FROM services WHERE id = ?`, id,
 	).Scan(&s.ID, &s.Name, &s.DisplayName, &s.Description,
-		&s.URL, &s.InternalURL, &s.Icon, &s.Category, &s.Group,
+		&s.URL, &s.PublicURL, &s.InternalURL, &s.Scheme, &s.Icon, &s.Category, &s.Group,
 		&s.HealthPath, &s.Type, &s.DockerID, &s.DockerName,
 		&s.Enabled, &s.Public, &s.Status, &s.Latency,
 		&lastChecked, &createdAt, &updatedAt)

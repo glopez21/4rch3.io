@@ -724,7 +724,7 @@ var serviceManageTmpl = template.Must(template.New("serviceManage").Parse(`<!DOC
                 <p class="text-gray-500 text-sm">{{.Description}}</p>
             </div>
             <div class="flex gap-2">
-                {{if .URL}}<a href="{{.URL}}" target="_blank" class="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-gray-300 hover:text-white hover:border-gray-600 text-sm">Open</a>{{end}}
+            {{if .PublicURL}}<a href="{{.PublicURL}}" target="_blank" class="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-gray-300 hover:text-white hover:border-gray-600 text-sm">Open</a>{{end}}
                 <a href="/svc/{{.Name}}" class="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-gray-300 hover:text-white hover:border-gray-600 text-sm">Proxy</a>
             </div>
         </div>

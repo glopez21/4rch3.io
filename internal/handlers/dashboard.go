@@ -70,6 +70,7 @@ type ServicePanelData struct {
 	DisplayName string
 	Description string
 	URL         string
+	PublicURL   string
 }
 
 // ServicePanel renders the service modal fragment (htmx target).
@@ -91,8 +92,9 @@ func (h *DashboardHandler) ServicePanel(w http.ResponseWriter, r *http.Request) 
 	if err := servicePanelTmpl.Execute(w, ServicePanelData{
 		ID:          svc.ID,
 		DisplayName: svc.DisplayName,
-		Description: svc.Description,
+	Description: svc.Description,
 		URL:         svc.URL,
+		PublicURL:   svc.PublicURL,
 	}); err != nil {
 		slog.Error("service panel render failed", "error", err)
 	}

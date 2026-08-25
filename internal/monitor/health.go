@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,9 @@ func New(db *database.DB, interval, timeout time.Duration, retries int) *Monitor
 				TLSClientConfig: &tls.Config{
 					InsecureSkipVerify: true,
 				},
+			},
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
 			},
 		},
 	}
@@ -89,6 +93,12 @@ func (m *Monitor) CheckService(ctx context.Context, svc *models.Service) {
 	if svc.InternalURL != "" {
 		target = svc.InternalURL
 	}
+
+	// apply scheme: if service scheme is https, ensure the URL uses https
+	if svc.Scheme == "https" && strings.HasPrefix(target, "http://") {
+		target = strings.Replace(target, "http://", "https://", 1)
+	}
+
 	if svc.HealthPath != "" {
 		target += svc.HealthPath
 	}

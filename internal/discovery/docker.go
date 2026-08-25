@@ -203,7 +203,16 @@ func (d *DockerDiscovery) containerToService(c dockerContainer) *models.Service 
 	}
 
 	if containerName != "" && privatePort > 0 {
-		svc.URL = fmt.Sprintf("http://%s:%d", containerName, privatePort)
+		scheme := "http"
+		if privatePort == 443 {
+			scheme = "https"
+		}
+		// allow explicit scheme override via label
+		if s := labels[d.labelPrefix+".scheme"]; s != "" {
+			scheme = s
+		}
+		svc.URL = fmt.Sprintf("%s://%s:%d", scheme, containerName, privatePort)
+		svc.Scheme = scheme
 	}
 
 	if c.NetworkSettings != nil {
@@ -213,6 +222,11 @@ func (d *DockerDiscovery) containerToService(c dockerContainer) *models.Service 
 				svc.InternalURL = fmt.Sprintf("http://%s:%d", netCfg.IPAddress, privatePort)
 			}
 		}
+	}
+
+	// public URL for the "Open" button: use 4rch3.io.url label
+	if publicURL, ok := labels[d.labelPrefix+".url"]; ok && publicURL != "" {
+		svc.PublicURL = publicURL
 	}
 
 	return svc

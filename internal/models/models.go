@@ -43,7 +43,9 @@ type Service struct {
 	DisplayName string    `json:"display_name"`
 	Description string    `json:"description"`
 	URL         string    `json:"url"`
+	PublicURL   string    `json:"public_url"`
 	InternalURL string    `json:"internal_url"`
+	Scheme      string    `json:"scheme"`
 	Icon        string    `json:"icon"`
 	Category    string    `json:"category"`
 	Group       string    `json:"group"`
