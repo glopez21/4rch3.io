@@ -12,7 +12,6 @@ concurrency:
 jobs:
   checks:
     runs-on: clu5t3r
-    container: golang:1.25-alpine
     steps:
       - name: Checkout
         env:
@@ -23,11 +22,11 @@ jobs:
           git fetch --depth 1 origin "${GITHUB_SHA}"
           git checkout FETCH_HEAD
 
-      - name: Go vet + build
+      - name: Go vet + build (in container)
         run: |
           set -euo pipefail
-          go vet ./...
-          go build ./...
+          docker run --rm -v "$PWD":/app -w /app golang:1.25-alpine sh -c \
+            'go vet ./... && go build ./...'
 
   build-images:
     runs-on: clu5t3r
