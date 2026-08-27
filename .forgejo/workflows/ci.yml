@@ -12,6 +12,7 @@ concurrency:
 jobs:
   checks:
     runs-on: clu5t3r
+    container: golang:1.25-alpine
     steps:
       - name: Checkout
         env:
