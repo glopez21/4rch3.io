@@ -47,7 +47,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 	data := DashboardData{
 		Authenticated: user != nil,
 		IsLAN:         isLAN,
-		Services:      toServiceCards(services),
+		Groups:        toServiceGroups(services),
 		Deploys:       toDeployRecords(deploys),
 		GrafanaDomain: h.grafanaDomain,
 	}
@@ -62,7 +62,7 @@ func (h *DashboardHandler) ServiceStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	serviceCardTmpl.Execute(w, toServiceCards(services))
+	serviceCardTmpl.Execute(w, toServiceGroups(services))
 }
 
 type ServicePanelData struct {

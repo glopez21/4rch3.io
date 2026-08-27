@@ -10,9 +10,17 @@ import (
 type DashboardData struct {
 	Authenticated bool
 	IsLAN         bool
-	Services      []ServiceCardData
+	Groups        []ServiceGroupData
 	Deploys       []DeployRecordData
 	GrafanaDomain string
+}
+
+// ServiceGroupData groups services under a named section, rendered with a
+// divider between groups.
+type ServiceGroupData struct {
+	Name     string
+	Label    string
+	Services []ServiceCardData
 }
 
 type DeployRecordData struct {
@@ -69,8 +77,21 @@ type AuditLogData struct {
 	Detail    string
 }
 
-func toServiceCards(services []*models.Service) []ServiceCardData {
-	cards := make([]ServiceCardData, 0, len(services))
+// thirdPartyServices lists 3rd-party/commercial apps that should be grouped
+// under their own section rather than the self-built core.
+var thirdPartyServices = map[string]bool{
+	"wazuh":   true,
+	"splunk":  true,
+	"thehive": true,
+	"misp":    true,
+	"cortex":  true,
+	"forgejo": true,
+	"grafana": true,
+	"prometheus": true,
+}
+
+func toServiceGroups(services []*models.Service) []ServiceGroupData {
+	var core, thirdParty []ServiceCardData
 	for _, svc := range services {
 		card := ServiceCardData{
 			ID:          svc.ID,
@@ -92,9 +113,21 @@ func toServiceCards(services []*models.Service) []ServiceCardData {
 		if card.Icon == "" {
 			card.Icon = "\u229e"
 		}
-		cards = append(cards, card)
+		if thirdPartyServices[svc.Name] {
+			thirdParty = append(thirdParty, card)
+		} else {
+			core = append(core, card)
+		}
 	}
-	return cards
+
+	groups := make([]ServiceGroupData, 0, 2)
+	if len(core) > 0 {
+		groups = append(groups, ServiceGroupData{Name: "core", Label: "Core SOC", Services: core})
+	}
+	if len(thirdParty) > 0 {
+		groups = append(groups, ServiceGroupData{Name: "thirdparty", Label: "3rd Party", Services: thirdParty})
+	}
+	return groups
 }
 
 func toDeployRecords(logs []*models.AuditLog) []DeployRecordData {
@@ -371,34 +404,44 @@ var dashboardTmpl = template.Must(template.New("dashboard").Parse(`<!DOCTYPE htm
             </button>
         </div>
 
-        <div id="services-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {{if and (not .Authenticated) (eq (len .Services) 0)}}
+        <div id="services-grid" class="space-y-6">
+        {{if and (not .Authenticated) (eq (len .Groups) 0)}}
             <div class="col-span-full text-center py-12">
                 <p class="text-gray-500">no services discovered yet</p>
                 <p class="text-gray-600 text-sm mt-2">login to access the portal</p>
             </div>
         {{else}}
-            {{range .Services}}
-            <div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5 cursor-pointer"
-                 hx-get="/api/service-panel?id={{.ID}}"
-                 hx-trigger="click"
-                 hx-target="#service-modal-content"
-                 hx-swap="innerHTML"
-                 onclick="document.getElementById('service-modal').classList.remove('hidden')">
-                <div class="flex items-start justify-between mb-3">
-                    <div class="flex items-center gap-3">
-                        <span class="text-xl">{{.Icon}}</span>
-                        <div>
-                            <h3 class="text-gray-200 font-semibold text-sm">{{.DisplayName}}</h3>
-                            <span class="text-gray-600 text-xs">{{.Name}}</span>
-                        </div>
-                    </div>
-                    <span class="status-dot {{.DotColor}}"></span>
+            {{range .Groups}}
+            <div class="mt-8 first:mt-0">
+                <div class="flex items-center gap-3 mb-4 pt-6 border-t border-gray-800 first:border-t-0 first:pt-0 first:mt-0">
+                    <h3 class="text-sm font-bold tracking-widest text-gray-500 uppercase">{{.Label}}</h3>
+                    <div class="flex-1 h-px bg-gradient-to-r from-gray-700 to-transparent"></div>
                 </div>
-                <p class="text-gray-500 text-xs mb-3 line-clamp-1">{{.Description}}</p>
-                <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-800">
-                    <span class="{{.StatusColor}} text-xs font-medium">{{.Status}}</span>
-                    <span class="text-gray-600 text-xs">{{.LatencyStr}}</span>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {{range .Services}}
+                <div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5 cursor-pointer"
+                     hx-get="/api/service-panel?id={{.ID}}"
+                     hx-trigger="click"
+                     hx-target="#service-modal-content"
+                     hx-swap="innerHTML"
+                     onclick="document.getElementById('service-modal').classList.remove('hidden')">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">{{.Icon}}</span>
+                            <div>
+                                <h3 class="text-gray-200 font-semibold text-sm">{{.DisplayName}}</h3>
+                                <span class="text-gray-600 text-xs">{{.Name}}</span>
+                            </div>
+                        </div>
+                        <span class="status-dot {{.DotColor}}"></span>
+                    </div>
+                    <p class="text-gray-500 text-xs mb-3 line-clamp-1">{{.Description}}</p>
+                    <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-800">
+                        <span class="{{.StatusColor}} text-xs font-medium">{{.Status}}</span>
+                        <span class="text-gray-600 text-xs">{{.LatencyStr}}</span>
+                    </div>
+                </div>
+                {{end}}
                 </div>
             </div>
             {{end}}
@@ -496,7 +539,13 @@ var deployPanelTmpl = template.Must(template.New("deployPanel").Parse(
 	</div>{{end}}`))
 
 var serviceCardTmpl = template.Must(template.New("serviceCard").Parse(
-	`{{range .}}<div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5 cursor-pointer"
+	`{{range .}}<div class="mt-8 first:mt-0">
+    <div class="flex items-center gap-3 mb-4 pt-6 border-t border-gray-800 first:border-t-0 first:pt-0 first:mt-0">
+        <h3 class="text-sm font-bold tracking-widest text-gray-500 uppercase">{{.Label}}</h3>
+        <div class="flex-1 h-px bg-gradient-to-r from-gray-700 to-transparent"></div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {{range .Services}}<div class="card-hover bg-gray-900/50 border border-gray-800 rounded-2xl p-5 cursor-pointer"
         hx-get="/api/service-panel?id={{.ID}}"
         hx-trigger="click"
         hx-target="#service-modal-content"
@@ -517,7 +566,9 @@ var serviceCardTmpl = template.Must(template.New("serviceCard").Parse(
             <span class="{{.StatusColor}} text-xs font-medium">{{.Status}}</span>
             <span class="text-gray-600 text-xs">{{.LatencyStr}}</span>
         </div>
-    </div>{{end}}`))
+    </div>{{end}}
+    </div>
+</div>{{end}}`))
 
 var adminTmpl = template.Must(template.New("admin").Parse(`<!DOCTYPE html>
 <html lang="en" class="dark">

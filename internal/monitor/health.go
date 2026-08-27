@@ -89,9 +89,14 @@ func (m *Monitor) CheckAll(ctx context.Context) {
 }
 
 func (m *Monitor) CheckService(ctx context.Context, svc *models.Service) {
-	target := svc.URL
-	if svc.InternalURL != "" {
-		target = svc.InternalURL
+	// Prefer the DNS-resolvable container-name URL where possible. Raw
+	// InternalURL IPs (container IPs on a docker network) churn on every
+	// network/container recreation and can go stale, leaving services stuck
+	// "offline" even though they are healthy. Container names resolve via the
+	// shared docker network regardless of IP changes.
+	target := svc.InternalURL
+	if svc.URL != "" {
+		target = svc.URL
 	}
 
 	// apply scheme: if service scheme is https, ensure the URL uses https

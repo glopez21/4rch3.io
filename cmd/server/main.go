@@ -155,12 +155,18 @@ func main() {
 		if err != nil {
 			slog.Warn("failed to create docker discovery", "error", err)
 		} else {
+			// Log a warning if the socket is unavailable right now, but still
+			// start the scan loop. Scan() already handles a temporarily
+			// unavailable socket gracefully, so a socket that is not ready at
+			// startup (e.g. right after a reboot) recovers on the next tick
+			// instead of abandoning docker discovery permanently.
 			if err := dockerDisc.TestConnection(); err != nil {
-				slog.Warn("docker socket not available", "error", err)
+				slog.Warn("docker socket not available at startup, discovery will retry", "error", err)
 			} else {
-				go dockerDisc.Start(ctx)
-				defer dockerDisc.Close()
+				slog.Info("docker socket available")
 			}
+			go dockerDisc.Start(ctx)
+			defer dockerDisc.Close()
 		}
 	}
 
