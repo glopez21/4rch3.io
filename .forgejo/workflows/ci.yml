@@ -75,6 +75,7 @@ jobs:
       - name: Deploy with health gate + rollback
         env:
           SHA: ${{ github.sha }}
+          DOCKER_CONFIG: /home/x5pyd3rx/.docker
         run: |
           set -euo pipefail
           SHA_SHORT=${SHA:0:12}
