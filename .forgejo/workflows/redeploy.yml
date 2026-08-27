@@ -1,0 +1,32 @@
+name: Redeploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: Image SHA to deploy (empty = latest)
+        required: false
+        type: string
+
+jobs:
+  redeploy:
+    runs-on: clu5t3r
+    steps:
+      - name: Deploy selected image
+        env:
+          IMAGE_SHA: ${{ inputs.image_sha }}
+        run: |
+          set -euo pipefail
+          SELECTED=${IMAGE_SHA:-latest}
+          PORTAL_DIR=/home/x5pyd3rx/4rch3.io
+          docker pull localhost:5122/4rch3io-portal:${SELECTED}
+          docker tag  localhost:5122/4rch3io-portal:${SELECTED} 4rch3io-portal:latest
+          docker compose -f "$PORTAL_DIR/docker-compose.yml" up -d
+          for i in $(seq 1 60); do
+            st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' 4rch3-portal 2>/dev/null || echo missing)
+            [ "$st" = "healthy" ] && { echo "Deploy OK: ${SELECTED}"; exit 0; }
+            sleep 5
+          done
+          echo "Healthcheck FAILED for ${SELECTED}" >&2
+          docker logs 4rch3-portal --tail 50 2>&1 || true
+          exit 1

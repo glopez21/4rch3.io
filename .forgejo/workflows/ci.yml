@@ -1,0 +1,122 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    runs-on: clu5t3r
+    steps:
+      - name: Checkout
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_SHA}"
+          git checkout FETCH_HEAD
+
+      - name: Go vet + build
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go build ./...
+
+  build-images:
+    runs-on: clu5t3r
+    needs: [checks]
+    steps:
+      - name: Checkout
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_SHA}"
+          git checkout FETCH_HEAD
+
+      - name: Build image
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SHA_SHORT=${SHA:0:12}
+          docker build \
+            -t localhost:5122/4rch3io-portal:${SHA_SHORT} \
+            -t localhost:5122/4rch3io-portal:latest \
+            .
+
+      - name: Publish image (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SHA: ${{ github.sha }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SHA_SHORT=${SHA:0:12}
+          if [ -n "${REGISTRY_USER:-}" ]; then
+            docker login localhost:5122 -u "${REGISTRY_USER}" -p "${REGISTRY_PASSWORD}"
+          fi
+          docker push localhost:5122/4rch3io-portal:${SHA_SHORT}
+          docker push localhost:5122/4rch3io-portal:latest
+
+  deploy:
+    runs-on: clu5t3r
+    needs: [build-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy with health gate + rollback
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SHA_SHORT=${SHA:0:12}
+          PORTAL_DIR=/home/x5pyd3rx/4rch3.io
+          mkdir -p "$HOME/.portal-cd"
+          PREV=$(cat "$HOME/.portal-cd/current-release" 2>/dev/null || echo "")
+
+          deploy_sha() {
+            local target="$1"
+            # Align the local image tag the compose references with the registry image.
+            docker pull localhost:5122/4rch3io-portal:${target}
+            docker tag localhost:5122/4rch3io-portal:${target} 4rch3io-portal:latest
+            docker compose -f "$PORTAL_DIR/docker-compose.yml" up -d
+          }
+          wait_healthy() {
+            for i in $(seq 1 60); do
+              st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' 4rch3-portal 2>/dev/null || echo missing)
+              [ "$st" = "healthy" ] && return 0
+              sleep 5
+            done
+            return 1
+          }
+
+          echo "Deploying ${SHA_SHORT}"
+          deploy_sha "${SHA_SHORT}"
+          if wait_healthy; then
+            echo "${SHA_SHORT}" > "$HOME/.portal-cd/current-release"
+            echo "Deploy OK: ${SHA_SHORT}"
+            exit 0
+          fi
+
+          echo "Healthcheck FAILED for ${SHA_SHORT}" >&2
+          if [ -n "${PREV}" ] && [ "${PREV}" != "${SHA_SHORT}" ]; then
+            echo "Rolling back to ${PREV}" >&2
+            deploy_sha "${PREV}"
+            if wait_healthy; then
+              echo "Rollback OK: ${PREV}" >&2
+            else
+              echo "Rollback ALSO FAILED for ${PREV}" >&2
+            fi
+          else
+            echo "No previous release to roll back to" >&2
+          fi
+          docker logs 4rch3-portal --tail 50 2>&1 || true
+          exit 1
