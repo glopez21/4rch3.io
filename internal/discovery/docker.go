@@ -123,6 +123,7 @@ func (d *DockerDiscovery) Scan(ctx context.Context) {
 		return
 	}
 
+	live := make(map[string]bool, len(containers))
 	for _, c := range containers {
 		if c.State != "running" {
 			continue
@@ -132,6 +133,7 @@ func (d *DockerDiscovery) Scan(ctx context.Context) {
 		if svc == nil {
 			continue
 		}
+		live[c.ID] = true
 
 		id, err := d.db.CreateService(svc)
 		if err != nil {
@@ -141,9 +143,38 @@ func (d *DockerDiscovery) Scan(ctx context.Context) {
 		slog.Info("docker discovery: service discovered", "service", svc.Name, "id", id)
 	}
 
+	// Prune stale entries: drop docker-discovered services whose container is no
+	// longer present (removed or lost the enable label) so the dashboard never
+	// shows ghost cards for services that stopped advertising.
+	if err := d.pruneStale(live); err != nil {
+		slog.Warn("docker discovery: prune error", "error", err)
+	}
+
 	if len(containers) == 0 {
 		slog.Debug("docker discovery: no containers found", "label_prefix", d.labelPrefix)
 	}
+}
+
+// pruneStale removes docker-type service rows whose docker container is no
+// longer in the live discovery set.
+func (d *DockerDiscovery) pruneStale(live map[string]bool) error {
+	services, err := d.db.ListServices()
+	if err != nil {
+		return err
+	}
+	for _, svc := range services {
+		if svc.Type != "docker" || svc.DockerID == "" {
+			continue
+		}
+		if live[svc.DockerID] {
+			continue
+		}
+		if err := d.db.DeleteService(svc.ID); err != nil {
+			return err
+		}
+		slog.Info("docker discovery: pruned stale service", "service", svc.Name, "id", svc.ID)
+	}
+	return nil
 }
 
 func (d *DockerDiscovery) containerToService(c dockerContainer) *models.Service {

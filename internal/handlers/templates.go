@@ -77,21 +77,45 @@ type AuditLogData struct {
 	Detail    string
 }
 
-// thirdPartyServices lists 3rd-party/commercial apps that should be grouped
-// under their own section rather than the self-built core.
-var thirdPartyServices = map[string]bool{
-	"wazuh":   true,
-	"splunk":  true,
-	"thehive": true,
-	"misp":    true,
-	"cortex":  true,
-	"forgejo": true,
-	"grafana": true,
-	"prometheus": true,
+// groupDef defines a portal dashboard group: its internal name, the display
+// label rendered as the group header, and the set of service names (matched on
+// svc.Name) it contains. Any service not claimed by an explicit set falls back
+// to the Core SOC group.
+type groupDef struct {
+	Name    string
+	Label   string
+	Members map[string]bool
+}
+
+func newGroup(name, label string, members ...string) groupDef {
+	g := groupDef{Name: name, Label: label, Members: map[string]bool{}}
+	for _, m := range members {
+		g.Members[m] = true
+	}
+	return g
+}
+
+// groups is the ordered list of dashboard sections. Self-built SOC platforms
+// live in "core"; third-party/commercial vendor platforms live in
+// "integrations"; self-built infrastructure and future platform services live
+// in "backend".
+var groups = []groupDef{
+	newGroup("core", "Core SOC"),
+	newGroup("integrations", "Integrations",
+		"cortex", "thehive", "misp", "splunk", "wazuh",
+		"grafana", "prometheus", "kafka-ui",
+	),
+	newGroup("backend", "Backend",
+		"forgejo", "portal",
+	),
 }
 
 func toServiceGroups(services []*models.Service) []ServiceGroupData {
-	var core, thirdParty []ServiceCardData
+	byGroup := make(map[string][]ServiceCardData)
+	order := make([]string, 0, len(groups))
+	for _, g := range groups {
+		order = append(order, g.Name)
+	}
 	for _, svc := range services {
 		card := ServiceCardData{
 			ID:          svc.ID,
@@ -113,21 +137,25 @@ func toServiceGroups(services []*models.Service) []ServiceGroupData {
 		if card.Icon == "" {
 			card.Icon = "\u229e"
 		}
-		if thirdPartyServices[svc.Name] {
-			thirdParty = append(thirdParty, card)
-		} else {
-			core = append(core, card)
+		group := "core"
+		for _, g := range groups {
+			if g.Members[svc.Name] {
+				group = g.Name
+				break
+			}
 		}
+		byGroup[group] = append(byGroup[group], card)
 	}
 
-	groups := make([]ServiceGroupData, 0, 2)
-	if len(core) > 0 {
-		groups = append(groups, ServiceGroupData{Name: "core", Label: "Core SOC", Services: core})
+	out := make([]ServiceGroupData, 0, len(groups))
+	for _, g := range groups {
+		cards := byGroup[g.Name]
+		if len(cards) == 0 {
+			continue
+		}
+		out = append(out, ServiceGroupData{Name: g.Name, Label: g.Label, Services: cards})
 	}
-	if len(thirdParty) > 0 {
-		groups = append(groups, ServiceGroupData{Name: "thirdparty", Label: "3rd Party", Services: thirdParty})
-	}
-	return groups
+	return out
 }
 
 func toDeployRecords(logs []*models.AuditLog) []DeployRecordData {
