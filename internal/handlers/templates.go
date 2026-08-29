@@ -106,7 +106,7 @@ var groups = []groupDef{
 		"grafana", "prometheus", "kafka-ui",
 	),
 	newGroup("backend", "Backend",
-		"forgejo", "portal",
+		"forgejo", "portal", "m0rpheus",
 	),
 }
 
