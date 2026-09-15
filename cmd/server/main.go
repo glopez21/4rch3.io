@@ -95,7 +95,7 @@ func main() {
 	if strings.HasPrefix(dockerSocket, "unix://") {
 		dockerSocket = strings.TrimPrefix(dockerSocket, "unix://")
 	}
-	dashHandler := handlers.NewDashboardHandler(db, grafanaDomain, dockerSocket)
+	dashHandler := handlers.NewDashboardHandler(db, grafanaDomain, dockerSocket, cfg.Monitor.StatusPagePublic)
 	adminHandler := handlers.NewAdminHandler(db, svc)
 
 	authLimiter := middleware.NewRateLimiter(rate.Limit(cfg.Auth.RateLimitPerMin)/60, 3)

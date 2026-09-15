@@ -16,10 +16,15 @@ type DashboardHandler struct {
 	grafanaDomain string
 	dockerSocket  string
 	deployRunner  *deploy.Runner
+	// publicStatus mirrors monitor.status_page_public: when false, the index
+	// dashboard is gated behind auth (guests are redirected to /login). The
+	// per-card actions (/api/service-panel etc.) are RequireAuth either way, so
+	// a public shell whose card clicks 401 was just a dead end.
+	publicStatus bool
 }
 
-func NewDashboardHandler(db *database.DB, grafanaDomain string, dockerSocket string) *DashboardHandler {
-	return &DashboardHandler{db: db, grafanaDomain: grafanaDomain, dockerSocket: dockerSocket}
+func NewDashboardHandler(db *database.DB, grafanaDomain string, dockerSocket string, publicStatus bool) *DashboardHandler {
+	return &DashboardHandler{db: db, grafanaDomain: grafanaDomain, dockerSocket: dockerSocket, publicStatus: publicStatus}
 }
 
 // SetDeployRunner wires the deploy whitelist used by the manage page to
@@ -31,6 +36,11 @@ func (h *DashboardHandler) SetDeployRunner(r *deploy.Runner) {
 func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUser(r)
 	isLAN := middleware.IsLAN(r)
+
+	if !h.publicStatus && user == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 
 	services, err := h.db.ListServices()
 	if err != nil {
