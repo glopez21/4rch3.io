@@ -551,8 +551,8 @@
     (`docker exec 4rch3-portal cat /app/config.yaml`): targets = augur,
     threat-pulse, threatwirenews with their compose files; timeout 5m;
     `secret: "${PORTAL_DEPLOY_SECRET}"`.
-  - `PORTAL_DEPLOY_SECRET=bd9041d0b3ca6a5bf07faea88c0ec4bf71e99a5dd7d4868a`
-    and `PORTAL_JWT_SECRET` from running container env (`docker inspect`).
+  - `PORTAL_DEPLOY_SECRET` (40-hex, value redacted) and `PORTAL_JWT_SECRET`
+    from running container env (`docker inspect`).
 - **What is NOT recoverable:** the original newer `config.go`/`dashboard.go`/
   `webhook.go`/`main.go`/`docker-compose.yml` source — the BuildKit build
   cache was pruned (content store only 752K, no source blobs), and the image
